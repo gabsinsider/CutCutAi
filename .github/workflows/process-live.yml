@@ -60,6 +60,7 @@ jobs:
       - name: Capturar, analisar e criar corte
         env:
           WHISPER_MODEL: tiny
+          CUTAI_PROXY_URL: ${{ secrets.CUTAI_PROXY_URL }}
         run: python -m cutai.pipeline --url "${{ steps.params.outputs.url }}" --capture-seconds "${{ steps.params.outputs.seconds }}" --workdir work
       - name: Ler resultado
         id: result
