@@ -46,22 +46,18 @@ def make_clip_range(source: Path, output: Path, start: float, end: float) -> Non
     start = max(0.0, start)
     length = max(1.0, end - start)
     output.parent.mkdir(parents=True, exist_ok=True)
-    # Keep the original relationship between the live audio/video timestamps.
-    # A single input seek is applied to the muxed source; we deliberately avoid
-    # resetting audio and video PTS independently because live streams can have
-    # a legitimate non-zero A/V offset. vsync=passthrough also avoids changing
-    # video timing merely to force CFR.
+    # Seek on the muxed input so audio/video are cut from one timeline. Then let
+    # FFmpeg normalize the MP4 output timeline as a unit. We do not independently
+    # rewrite audio/video PTS and we do not use async audio stretching.
     run([
-        "ffmpeg", "-y",
-        "-copyts", "-start_at_zero",
-        "-ss", str(start),
-        "-i", str(source),
-        "-t", str(length),
+        "ffmpeg", "-y", "-fflags", "+genpts+discardcorrupt", "-err_detect", "ignore_err",
+        "-ss", str(start), "-i", str(source), "-t", str(length),
         "-map", "0:v:0", "-map", "0:a:0?",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
         "-profile:v", "high", "-pix_fmt", "yuv420p",
-        "-fps_mode:v", "passthrough",
+        "-fps_mode:v", "vfr",
         "-c:a", "aac", "-b:a", "192k",
+        "-avoid_negative_ts", "make_zero",
         "-movflags", "+faststart", "-shortest", str(output),
     ])
 
@@ -72,4 +68,6 @@ def make_clip(source: Path, output: Path, center: float, length: int = 60) -> No
 
 
 def thumbnail(source: Path, output: Path) -> None:
-    run(["ffmpeg", "-y", "-ss", "2", "-i", str(source), "-frames:v", "1", "-vf", "scale=640:-2", str(output)])
+    # Decode from the beginning instead of input-seeking a normalized MP4. This is
+    # more tolerant of live-derived files whose first keyframe is not exactly at 0.
+    run(["ffmpeg", "-y", "-i", str(source), "-vf", "select=gte(t\\,2),scale=640:-2", "-frames:v", "1", str(output)])
