@@ -21,12 +21,16 @@ MAX_CLIP_SECONDS = 90.0
 
 def download(url: str, output: Path, seconds: int) -> str:
     output.parent.mkdir(parents=True, exist_ok=True)
+    # Prefer a format that already contains video+audio in one stream. Capturing
+    # separate live video/audio representations and merging them afterwards can
+    # preserve different live-edge timestamps and produce visible lip-sync errors.
+    # A muxed stream gives FFmpeg one clock/timeline from the moment of capture.
     command = ["yt-dlp", "--no-playlist", "--no-progress", "--no-simulate", "--impersonate", "chrome",
                "--extractor-retries", "3", "--js-runtimes", "node",
                "--extractor-args", "youtube:player_client=default,android;formats=missing_pot",
                "--downloader", "ffmpeg", "--downloader-args", f"ffmpeg_i:-t {seconds}",
                "--merge-output-format", "mkv",
-               "-f", "bestvideo[height<=1080][fps<=30]+bestaudio/best[height<=1080][fps<=30]/bestvideo[height<=720][fps<=30]+bestaudio/best[height<=720]/best",
+               "-f", "best[height<=1080][fps<=30]/best[height<=720][fps<=30]/best",
                "-o", str(output), "--print", "title"]
     proxy_url = normalize_proxy_url(os.getenv("CUTAI_PROXY_URL", ""))
     if proxy_url:
@@ -88,25 +92,19 @@ def choose_smart_range(segments: list[dict], center: float, source_duration: flo
     core_start = max(0.0, core_end - MIN_CLIP_SECONDS)
     if not segments:
         return core_start, core_end
-
     start = core_start
     end = core_end
-    # Prefer beginning at the start of a spoken segment shortly before the 60s core.
     before = [s for s in segments if float(s.get("start", 0)) <= core_start and core_start - float(s.get("start", 0)) <= 12.0]
     if before:
         start = float(before[-1].get("start", core_start))
-    # Prefer finishing after the current thought rather than cutting the final sentence.
     after = [s for s in segments if float(s.get("end", 0)) >= core_end and float(s.get("end", 0)) - core_end <= 18.0]
     if after:
         end = float(after[0].get("end", core_end))
-
-    # Guarantee the user's hard minimum of 60 seconds.
     if end - start < MIN_CLIP_SECONDS:
         missing = MIN_CLIP_SECONDS - (end - start)
         grow_after = min(missing, source_duration - end)
         end += grow_after
         start = max(0.0, start - (missing - grow_after))
-    # Avoid runaway clips while still allowing context beyond one minute.
     if end - start > MAX_CLIP_SECONDS:
         end = start + MAX_CLIP_SECONDS
         if end > source_duration:
@@ -115,46 +113,41 @@ def choose_smart_range(segments: list[dict], center: float, source_duration: flo
     return start, end
 
 
-def _clip_transcript(segments: list[dict], start: float, end: float) -> str:
-    return " ".join(str(s.get("text", "")).strip() for s in segments if float(s.get("end", 0)) > start and float(s.get("start", 0)) < end).strip()
-
-
-def process(url: str, workdir: Path, ranking_path: Path, capture_seconds: int = 180) -> list[Clip]:
-    url, _ = validate_source_url(url)
+def process(url: str, workdir: Path, capture_seconds: int = 180) -> list[Clip]:
+    validate_source_url(url)
+    workdir.mkdir(parents=True, exist_ok=True)
     source = workdir / "capture.mkv"
-    source_title = download(url, source, min(max(capture_seconds, 60), 900))
+    title = download(url, source, max(60, min(capture_seconds, 900)))
     source_duration = duration(source)
     if source_duration < MIN_CLIP_SECONDS:
         raise RuntimeError(f"A plataforma entregou somente {source_duration:.1f}s utilizáveis. São necessários pelo menos 60s para publicar um corte.")
-    transcript, segments = transcribe(source, os.getenv("WHISPER_MODEL", "tiny"))
-    rms_mean, rms_peak = audio_metrics(source)
-    a_score, a_reasons = audio_score(rms_mean, rms_peak)
-    t_score, t_reasons = transcript_score(transcript)
-    source_scene = scene_score(source)
-    base_score = combine_scores(a_score, t_score, source_scene, a_reasons + t_reasons)
-    candidates = choose_top_centers(segments, source_duration)
-    now = datetime.now(UTC)
-    clips = []
-    for rank, (semantic_score, center) in enumerate(candidates, start=1):
+    segments = transcribe(source)
+    centers = choose_top_centers(segments, source_duration, clip_length=60, limit=3)
+    clips: list[Clip] = []
+    for rank, (window_score, center) in enumerate(centers, start=1):
         start, end = choose_smart_range(segments, center, source_duration)
-        clip_id = hashlib.sha256(f"{url}-{now.isoformat()}-{rank}-{start}-{end}".encode()).hexdigest()[:12]
+        clip_id = hashlib.sha1(f"{url}-{datetime.now(UTC).isoformat()}-{rank}-{start:.3f}-{end:.3f}".encode()).hexdigest()[:12]
         clip_path = workdir / f"{clip_id}.mp4"
-        make_clip_range(source, clip_path, start, end)
         thumb_path = workdir / f"{clip_id}.jpg"
+        make_clip_range(source, clip_path, start, end)
         thumbnail(clip_path, thumb_path)
-        local_transcript = _clip_transcript(segments, start, end) or transcript
-        description, hashtags = suggest_metadata(local_transcript)
-        local_scene = scene_score(clip_path)
-        final_score = round(max(0.0, min(100.0, base_score.total * 0.70 + semantic_score * 0.20 + local_scene * 0.10)), 2)
-        clip = Clip(id=clip_id, title=description[:80], source_url=url, source_title=source_title,
-                    created_at=now.isoformat(), duration=duration(clip_path), score=final_score,
-                    score_breakdown={"audio": base_score.audio, "transcript": base_score.transcript, "scene": local_scene},
-                    transcript=local_transcript, description=description, hashtags=hashtags,
-                    reasons=base_score.reasons + [f"Top {rank}; janela inteligente {start:.1f}s–{end:.1f}s ({end-start:.1f}s)"])
-        upsert_clip(ranking_path, clip)
+        local_segments = []
+        for segment in segments:
+            seg_start = float(segment.get("start", 0))
+            seg_end = float(segment.get("end", 0))
+            if seg_end > start and seg_start < end:
+                local_segments.append({**segment, "start": max(0.0, seg_start - start), "end": min(end - start, seg_end - start)})
+        transcript = " ".join(str(s.get("text", "")).strip() for s in local_segments).strip()
+        mean_amp, peak_amp = audio_metrics(clip_path)
+        a_score = audio_score(mean_amp, peak_amp)
+        t_score = transcript_score(transcript)
+        v_score = scene_score(clip_path)
+        score = combine_scores(a_score, t_score, v_score)
+        metadata = suggest_metadata(title, transcript)
+        reason = f"Top {rank}; janela inteligente {start:.1f}s–{end:.1f}s ({end-start:.1f}s); núcleo {window_score:.1f}; áudio {a_score:.1f}; fala {t_score:.1f}; visual {v_score:.1f}"
+        clip = Clip(id=clip_id, source_url=url, title=metadata["title"], duration_seconds=end-start, score=score, reason=reason, transcript=transcript, created_at=datetime.now(UTC).isoformat(), file=str(clip_path), thumbnail=str(thumb_path), hashtags=metadata["hashtags"])
         clips.append(clip)
-    payload = {"clips": [clip.to_dict() for clip in clips], "count": len(clips), "best_id": clips[0].id}
-    (workdir / "result.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        upsert_clip(clip)
     return clips
 
 
@@ -162,11 +155,12 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", required=True)
     parser.add_argument("--workdir", type=Path, default=Path("work"))
-    parser.add_argument("--ranking", type=Path, default=Path("data/ranking.json"))
     parser.add_argument("--capture-seconds", type=int, default=180)
     args = parser.parse_args()
-    clips = process(args.url, args.workdir, args.ranking, args.capture_seconds)
-    print(json.dumps({"clips": [clip.to_dict() for clip in clips]}, ensure_ascii=False))
+    clips = process(args.url, args.workdir, args.capture_seconds)
+    result = {"clips": [clip.__dict__ for clip in clips], "count": len(clips), "best_id": clips[0].id if clips else None}
+    (args.workdir / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps(result, ensure_ascii=False))
 
 
 if __name__ == "__main__":
