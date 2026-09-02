@@ -21,10 +21,6 @@ MAX_CLIP_SECONDS = 90.0
 
 def download(url: str, output: Path, seconds: int) -> str:
     output.parent.mkdir(parents=True, exist_ok=True)
-    # Prefer a format that already contains video+audio in one stream. Capturing
-    # separate live video/audio representations and merging them afterwards can
-    # preserve different live-edge timestamps and produce visible lip-sync errors.
-    # A muxed stream gives FFmpeg one clock/timeline from the moment of capture.
     command = ["yt-dlp", "--no-playlist", "--no-progress", "--no-simulate", "--impersonate", "chrome",
                "--extractor-retries", "3", "--js-runtimes", "node",
                "--extractor-args", "youtube:player_client=default,android;formats=missing_pot",
@@ -86,14 +82,12 @@ def choose_top_centers(segments: list[dict], source_duration: float, clip_length
 
 
 def choose_smart_range(segments: list[dict], center: float, source_duration: float) -> tuple[float, float]:
-    """Expand a 60s core to natural speech boundaries, never below 60s and capped at 90s."""
     core_start = max(0.0, center - MIN_CLIP_SECONDS / 2)
     core_end = min(source_duration, core_start + MIN_CLIP_SECONDS)
     core_start = max(0.0, core_end - MIN_CLIP_SECONDS)
     if not segments:
         return core_start, core_end
-    start = core_start
-    end = core_end
+    start, end = core_start, core_end
     before = [s for s in segments if float(s.get("start", 0)) <= core_start and core_start - float(s.get("start", 0)) <= 12.0]
     if before:
         start = float(before[-1].get("start", core_start))
@@ -121,7 +115,7 @@ def process(url: str, workdir: Path, capture_seconds: int = 180) -> list[Clip]:
     source_duration = duration(source)
     if source_duration < MIN_CLIP_SECONDS:
         raise RuntimeError(f"A plataforma entregou somente {source_duration:.1f}s utilizáveis. São necessários pelo menos 60s para publicar um corte.")
-    segments = transcribe(source)
+    _full_transcript, segments = transcribe(source)
     centers = choose_top_centers(segments, source_duration, clip_length=60, limit=3)
     clips: list[Clip] = []
     for rank, (window_score, center) in enumerate(centers, start=1):
