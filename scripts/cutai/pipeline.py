@@ -42,9 +42,64 @@ def download(url: str, output: Path, seconds: int) -> str:
     return result.stdout.strip().splitlines()[-1] if result.stdout.strip() else "Live"
 
 
+def _segment_excitement(text: str) -> float:
+    """Lightweight semantic signal for moments that tend to work as short clips."""
+    normalized = text.lower()
+    keywords = {
+        "gol", "goal", "golaço", "incrível", "absurdo", "caramba", "nossa", "wow",
+        "olha", "atenção", "agora", "mano", "meu deus", "não acredito", "que isso",
+        "risada", "haha", "kkkk", "vitória", "ganhou", "perdeu", "recorde", "melhor",
+    }
+    score = sum(1.0 for word in keywords if word in normalized)
+    score += min(2.0, text.count("!") * 0.5 + text.count("?") * 0.25)
+    # Very short fragments are usually poor standalone clips.
+    if len(text.split()) < 4:
+        score *= 0.5
+    return score
+
+
+def choose_best_center(source: Path, segments: list[dict], source_duration: float, clip_length: int = 60) -> float:
+    """Choose the strongest 60s window using speech density, excitement and scene activity."""
+    if source_duration <= clip_length:
+        return source_duration / 2
+    if not segments:
+        return max(clip_length / 2, source_duration / 2)
+
+    half = clip_length / 2
+    step = 10.0
+    first = half
+    last = max(first, source_duration - half)
+    candidates = []
+    center = first
+    while center <= last + 0.01:
+        start, end = center - half, center + half
+        inside = [s for s in segments if float(s.get("end", 0)) > start and float(s.get("start", 0)) < end]
+        speech_seconds = sum(max(0.0, min(end, float(s.get("end", 0))) - max(start, float(s.get("start", 0)))) for s in inside)
+        words = sum(len(str(s.get("text", "")).split()) for s in inside)
+        excitement = sum(_segment_excitement(str(s.get("text", ""))) for s in inside)
+        # Reward active, understandable speech and expressive moments; avoid silence-heavy windows.
+        score = min(30.0, speech_seconds * 0.5) + min(25.0, words * 0.12) + min(35.0, excitement * 5.0)
+        candidates.append((score, center))
+        center += step
+
+    # Inspect visual activity only for the best semantic candidates to keep Actions fast.
+    candidates.sort(reverse=True)
+    best_score, best_center = candidates[0]
+    for semantic_score, candidate_center in candidates[:3]:
+        probe = source.parent / f"candidate-{int(candidate_center)}.mp4"
+        try:
+            make_clip(source, probe, candidate_center, length=clip_length)
+            visual = scene_score(probe)
+            total = semantic_score + visual * 0.15
+            if total > best_score:
+                best_score, best_center = total, candidate_center
+        finally:
+            probe.unlink(missing_ok=True)
+    return best_center
+
+
 def process(url: str, workdir: Path, ranking_path: Path, capture_seconds: int = 180) -> Clip:
     url, _ = validate_source_url(url)
-    # MKV safely contains separate 1080p video/audio streams and tolerates live timestamps.
     source = workdir / "capture.mkv"
     source_title = download(url, source, min(max(capture_seconds, 60), 900))
     source_duration = duration(source)
@@ -53,7 +108,7 @@ def process(url: str, workdir: Path, ranking_path: Path, capture_seconds: int = 
             f"A plataforma entregou somente {source_duration:.1f}s utilizáveis. "
             "O corte não será publicado; tente uma live estável e ativa."
         )
-    transcript, _ = transcribe(source, os.getenv("WHISPER_MODEL", "tiny"))
+    transcript, segments = transcribe(source, os.getenv("WHISPER_MODEL", "tiny"))
     rms_mean, rms_peak = audio_metrics(source)
     a_score, a_reasons = audio_score(rms_mean, rms_peak)
     t_score, t_reasons = transcript_score(transcript)
@@ -61,7 +116,7 @@ def process(url: str, workdir: Path, ranking_path: Path, capture_seconds: int = 
     score = combine_scores(a_score, t_score, s_score, a_reasons + t_reasons)
     clip_id = hashlib.sha256(f"{url}-{datetime.now(UTC).isoformat()}".encode()).hexdigest()[:12]
     clip_path = workdir / f"{clip_id}.mp4"
-    center = max(30, source_duration / 2)
+    center = choose_best_center(source, segments, source_duration)
     make_clip(source, clip_path, center)
     thumb_path = workdir / f"{clip_id}.jpg"
     thumbnail(clip_path, thumb_path)
