@@ -2,18 +2,15 @@ name: Processar live
 
 on:
   issues:
-    types:
-      - opened
-      - reopened
-      - labeled
+    types: [opened, reopened, labeled]
   workflow_dispatch:
     inputs:
       live_url:
-        description: Link da transmissao
+        description: Link da transmissão
         required: true
         type: string
       capture_seconds:
-        description: Segundos nesta captura
+        description: Segundos nesta captura (60–900)
         required: false
         default: "180"
         type: string
@@ -28,7 +25,7 @@ permissions:
 
 jobs:
   process:
-    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[LIVE]') || contains(github.event.issue.labels.*.name, 'live-request') }}
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[LIVE]') || contains(github.event.issue.labels.*.name, 'live-request')
     runs-on: ubuntu-latest
     timeout-minutes: 330
     steps:
@@ -37,7 +34,6 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-
       - name: Instalar ferramentas
         run: |
           sudo apt-get update
@@ -45,13 +41,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e '.[ai]'
           pip install 'yt-dlp[default,curl-cffi]'
-
-      - name: Extrair link da Issue
-        if: ${{ github.event_name == 'issues' }}
+      - name: Extrair link da Issue com segurança
+        if: github.event_name == 'issues'
         id: issue
         run: python scripts/parse_issue.py
-
-      - name: Resolver parametros
+      - name: Resolver parâmetros
         id: params
         env:
           ISSUE_URL: ${{ steps.issue.outputs.url }}
@@ -63,52 +57,46 @@ jobs:
           if ! [[ "$SECONDS" =~ ^[0-9]+$ ]] || (( SECONDS < 60 || SECONDS > 900 )); then SECONDS=180; fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "seconds=$SECONDS" >> "$GITHUB_OUTPUT"
-
-      - name: Capturar analisar e criar Top 3
+      - name: Capturar, analisar e criar Top 3
         env:
           WHISPER_MODEL: tiny
           CUTAI_PROXY_URL: ${{ secrets.CUTAI_PROXY_URL }}
         run: python -m cutai.pipeline --url "${{ steps.params.outputs.url }}" --capture-seconds "${{ steps.params.outputs.seconds }}" --workdir work
-
       - name: Ler resultado
         id: result
         run: |
-          COUNT=$(python -c 'import json; print(json.load(open("work/result.json"))["count"])')
-          IDS=$(python -c 'import json; print(" ".join(x["id"] for x in json.load(open("work/result.json"))["clips"]))')
-          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
-          echo "ids=$IDS" >> "$GITHUB_OUTPUT"
-
-      - name: Criar releases e enviar midias
+          echo "clip1=$(python -c 'import json;d=json.load(open("work/result.json"));print(d["clips"][0]["id"] if len(d["clips"])>0 else "")')" >> "$GITHUB_OUTPUT"
+          echo "clip2=$(python -c 'import json;d=json.load(open("work/result.json"));print(d["clips"][1]["id"] if len(d["clips"])>1 else "")')" >> "$GITHUB_OUTPUT"
+          echo "clip3=$(python -c 'import json;d=json.load(open("work/result.json"));print(d["clips"][2]["id"] if len(d["clips"])>2 else "")')" >> "$GITHUB_OUTPUT"
+      - name: Criar Releases e enviar mídias
         env:
           GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          CLIP_IDS: ${{ steps.result.outputs.ids }}
+          CLIP1: ${{ steps.result.outputs.clip1 }}
+          CLIP2: ${{ steps.result.outputs.clip2 }}
+          CLIP3: ${{ steps.result.outputs.clip3 }}
         run: |
           RANK=0
-          for CLIP_ID in $CLIP_IDS; do
+          for CLIP_ID in "$CLIP1" "$CLIP2" "$CLIP3"; do
+            [ -z "$CLIP_ID" ] && continue
             RANK=$((RANK + 1))
             TAG="clip-$CLIP_ID"
-            python -c "import json; d=json.load(open('work/result.json')); c=next(x for x in d['clips'] if x['id']=='$CLIP_ID'); open('work/release-notes.json','w').write(json.dumps(c,ensure_ascii=False,indent=2))"
-            gh release create "$TAG" "work/$CLIP_ID.mp4" "work/$CLIP_ID.jpg" --title "CutCutAi - Top $RANK - $CLIP_ID" --notes-file work/release-notes.json
-            BASE="https://github.com/$REPOSITORY/releases/download/$TAG"
+            gh release create "$TAG" "work/$CLIP_ID.mp4" "work/$CLIP_ID.jpg" --title "CutCutAi · Top $RANK · $CLIP_ID" --notes "Corte Top $RANK gerado automaticamente pelo CutCutAi."
+            BASE="https://github.com/${{ github.repository }}/releases/download/$TAG"
             python scripts/update_release_metadata.py --ranking data/ranking.json --clip "$CLIP_ID" --asset-url "$BASE/$CLIP_ID.mp4" --thumbnail-url "$BASE/$CLIP_ID.jpg" --tag "$TAG"
           done
-
       - name: Atualizar ranking
-        env:
-          CLIP_COUNT: ${{ steps.result.outputs.count }}
         run: |
           git config user.name "cutcutai-bot"
           git config user.email "actions@users.noreply.github.com"
           git add data/ranking.json
-          git commit -m "data: adicionar Top $CLIP_COUNT cortes da live"
+          git commit -m "data: adicionar Top 3 cortes da live"
           git pull --rebase
           git push
-
       - name: Comentar resultado
-        if: ${{ github.event_name == 'issues' }}
+        if: github.event_name == 'issues'
         env:
           GH_TOKEN: ${{ github.token }}
-          CLIP_COUNT: ${{ steps.result.outputs.count }}
-          CLIP_IDS: ${{ steps.result.outputs.ids }}
-        run: gh issue comment "${{ github.event.issue.number }}" --body "Top $CLIP_COUNT cortes concluidos. IDs: $CLIP_IDS. O ranking foi atualizado no site."
+          CLIP1: ${{ steps.result.outputs.clip1 }}
+          CLIP2: ${{ steps.result.outputs.clip2 }}
+          CLIP3: ${{ steps.result.outputs.clip3 }}
+        run: gh issue comment "${{ github.event.issue.number }}" --body "Top cortes concluídos: $CLIP1 $CLIP2 $CLIP3. O ranking foi atualizado no site."
