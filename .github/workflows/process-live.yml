@@ -57,7 +57,7 @@ jobs:
           if ! [[ "$SECONDS" =~ ^[0-9]+$ ]] || (( SECONDS < 60 || SECONDS > 900 )); then SECONDS=180; fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "seconds=$SECONDS" >> "$GITHUB_OUTPUT"
-      - name: Capturar, analisar e criar corte
+      - name: Capturar, analisar e criar Top 3
         env:
           WHISPER_MODEL: tiny
           CUTAI_PROXY_URL: ${{ secrets.CUTAI_PROXY_URL }}
@@ -65,27 +65,37 @@ jobs:
       - name: Ler resultado
         id: result
         run: |
-          echo "clip_id=$(python -c 'import json;print(json.load(open("work/result.json"))["id"])')" >> "$GITHUB_OUTPUT"
-          echo "score=$(python -c 'import json;print(json.load(open("work/result.json"))["score"])')" >> "$GITHUB_OUTPUT"
-      - name: Criar Release e enviar mídia
+          echo "best_id=$(python -c 'import json;print(json.load(open("work/result.json"))["best_id"])')" >> "$GITHUB_OUTPUT"
+          echo "count=$(python -c 'import json;print(json.load(open("work/result.json"))["count"])')" >> "$GITHUB_OUTPUT"
+          echo "ids=$(python -c 'import json;print(" ".join(x["id"] for x in json.load(open("work/result.json"))["clips"]))')" >> "$GITHUB_OUTPUT"
+      - name: Criar Releases e enviar mídias
         env:
           GH_TOKEN: ${{ github.token }}
-          CLIP_ID: ${{ steps.result.outputs.clip_id }}
         run: |
-          TAG="clip-$CLIP_ID"
-          gh release create "$TAG" "work/$CLIP_ID.mp4" "work/$CLIP_ID.jpg" --title "CutCutAi · $CLIP_ID" --notes-file work/result.json
-          BASE="https://github.com/${{ github.repository }}/releases/download/$TAG"
-          python scripts/update_release_metadata.py --ranking data/ranking.json --clip "$CLIP_ID" --asset-url "$BASE/$CLIP_ID.mp4" --thumbnail-url "$BASE/$CLIP_ID.jpg" --tag "$TAG"
+          python - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          result = json.load(open('work/result.json', encoding='utf-8'))
+          repo = '${{ github.repository }}'
+          for rank, clip in enumerate(result['clips'], 1):
+              cid = clip['id']
+              tag = f'clip-{cid}'
+              notes = Path(f'work/{cid}-result.json')
+              notes.write_text(json.dumps(clip, ensure_ascii=False, indent=2), encoding='utf-8')
+              subprocess.run(['gh', 'release', 'create', tag, f'work/{cid}.mp4', f'work/{cid}.jpg', '--title', f'CutCutAi · Top {rank} · {cid}', '--notes-file', str(notes)], check=True)
+              base = f'https://github.com/{repo}/releases/download/{tag}'
+              subprocess.run(['python', 'scripts/update_release_metadata.py', '--ranking', 'data/ranking.json', '--clip', cid, '--asset-url', f'{base}/{cid}.mp4', '--thumbnail-url', f'{base}/{cid}.jpg', '--tag', tag], check=True)
+          PY
       - name: Atualizar ranking
         run: |
           git config user.name "cutcutai-bot"
           git config user.email "actions@users.noreply.github.com"
           git add data/ranking.json
-          git commit -m "data: adicionar corte ${{ steps.result.outputs.clip_id }}"
+          git commit -m "data: adicionar Top ${{ steps.result.outputs.count }} cortes da live"
           git pull --rebase
           git push
       - name: Comentar resultado
         if: github.event_name == 'issues'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh issue comment "${{ github.event.issue.number }}" --body "Corte **${{ steps.result.outputs.clip_id }}** concluído com score **${{ steps.result.outputs.score }}**. O ranking será atualizado no site."
+        run: gh issue comment "${{ github.event.issue.number }}" --body "Top **${{ steps.result.outputs.count }}** cortes concluídos. IDs: **${{ steps.result.outputs.ids }}**. O ranking foi atualizado no site."
