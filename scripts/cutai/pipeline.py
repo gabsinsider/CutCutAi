@@ -21,10 +21,16 @@ def download(url: str, output: Path, seconds: int) -> str:
                "--extractor-retries", "3", "--js-runtimes", "node",
                "--extractor-args", "youtube:player_client=default,android;formats=missing_pot",
                "--downloader", "ffmpeg", "--downloader-args", f"ffmpeg_i:-t {seconds}",
-               "-f", "best[height<=1080]/best", "-o", str(output), "--print", "title", url]
+               "-f", "best[height<=1080]/best", "-o", str(output), "--print", "title"]
+    proxy_url = os.getenv("CUTAI_PROXY_URL", "").strip()
+    if proxy_url:
+        command.extend(["--proxy", proxy_url])
+    command.append(url)
     result = subprocess.run(command, text=True, capture_output=True)
     if result.returncode:
         detail = result.stderr.strip()[-3000:] or result.stdout.strip()[-3000:]
+        if proxy_url:
+            detail = detail.replace(proxy_url, "[proxy protegido]")
         raise RuntimeError(f"yt-dlp não conseguiu acessar esta transmissão:\n{detail}")
     return result.stdout.strip().splitlines()[-1] if result.stdout.strip() else "Live"
 
