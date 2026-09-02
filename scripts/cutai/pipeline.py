@@ -17,6 +17,7 @@ from .validation import validate_source_url
 
 MIN_CLIP_SECONDS = 60.0
 MAX_CLIP_SECONDS = 90.0
+RANKING_PATH = Path("data/ranking.json")
 
 
 def download(url: str, output: Path, seconds: int) -> str:
@@ -111,7 +112,7 @@ def process(url: str, workdir: Path, capture_seconds: int = 180) -> list[Clip]:
     validate_source_url(url)
     workdir.mkdir(parents=True, exist_ok=True)
     source = workdir / "capture.mkv"
-    title = download(url, source, max(60, min(capture_seconds, 900)))
+    source_title = download(url, source, max(60, min(capture_seconds, 900)))
     source_duration = duration(source)
     if source_duration < MIN_CLIP_SECONDS:
         raise RuntimeError(f"A plataforma entregou somente {source_duration:.1f}s utilizáveis. São necessários pelo menos 60s para publicar um corte.")
@@ -137,12 +138,26 @@ def process(url: str, workdir: Path, capture_seconds: int = 180) -> list[Clip]:
         t_score, t_reasons = transcript_score(transcript)
         v_score = scene_score(clip_path)
         score_data = combine_scores(a_score, t_score, v_score, a_reasons + t_reasons)
-        score = score_data.total
-        metadata = suggest_metadata(title, transcript)
-        reason = f"Top {rank}; janela inteligente {start:.1f}s–{end:.1f}s ({end-start:.1f}s); núcleo {window_score:.1f}; áudio {a_score:.1f}; fala {t_score:.1f}; visual {v_score:.1f}"
-        clip = Clip(id=clip_id, source_url=url, title=metadata["title"], duration_seconds=end-start, score=score, reason=reason, transcript=transcript, created_at=datetime.now(UTC).isoformat(), file=str(clip_path), thumbnail=str(thumb_path), hashtags=metadata["hashtags"])
+        description, hashtags = suggest_metadata(transcript)
+        clip_title = description[:80] if description else source_title[:80]
+        reasons = list(score_data.reasons)
+        reasons.append(f"Top {rank}; janela inteligente {start:.1f}s–{end:.1f}s ({end-start:.1f}s); núcleo {window_score:.1f}")
+        clip = Clip(
+            id=clip_id,
+            title=clip_title,
+            source_url=url,
+            source_title=source_title,
+            created_at=datetime.now(UTC).isoformat(),
+            duration=end-start,
+            score=score_data.total,
+            score_breakdown={"audio": a_score, "transcript": t_score, "scene": v_score, "window": round(window_score, 2)},
+            transcript=transcript,
+            description=description,
+            hashtags=hashtags,
+            reasons=reasons,
+        )
         clips.append(clip)
-        upsert_clip(clip)
+        upsert_clip(RANKING_PATH, clip)
     return clips
 
 
@@ -153,7 +168,7 @@ def main() -> None:
     parser.add_argument("--capture-seconds", type=int, default=180)
     args = parser.parse_args()
     clips = process(args.url, args.workdir, args.capture_seconds)
-    result = {"clips": [clip.__dict__ for clip in clips], "count": len(clips), "best_id": clips[0].id if clips else None}
+    result = {"clips": [clip.to_dict() for clip in clips], "count": len(clips), "best_id": clips[0].id if clips else None}
     (args.workdir / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False))
 
