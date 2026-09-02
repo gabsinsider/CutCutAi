@@ -65,31 +65,43 @@ jobs:
       - name: Ler resultado
         id: result
         run: |
-          echo "clip1=$(python -c 'import json;d=json.load(open("work/result.json"));print(d["clips"][0]["id"] if len(d["clips"])>0 else "")')" >> "$GITHUB_OUTPUT"
-          echo "clip2=$(python -c 'import json;d=json.load(open("work/result.json"));print(d["clips"][1]["id"] if len(d["clips"])>1 else "")')" >> "$GITHUB_OUTPUT"
-          echo "clip3=$(python -c 'import json;d=json.load(open("work/result.json"));print(d["clips"][2]["id"] if len(d["clips"])>2 else "")')" >> "$GITHUB_OUTPUT"
-      - name: Criar Releases e enviar mídias
+          python scripts/export_top3_outputs.py work/result.json "$GITHUB_OUTPUT"
+      - name: Criar Release 1
+        if: steps.result.outputs.clip1 != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          CLIP1: ${{ steps.result.outputs.clip1 }}
-          CLIP2: ${{ steps.result.outputs.clip2 }}
-          CLIP3: ${{ steps.result.outputs.clip3 }}
+          CLIP_ID: ${{ steps.result.outputs.clip1 }}
         run: |
-          RANK=0
-          for CLIP_ID in "$CLIP1" "$CLIP2" "$CLIP3"; do
-            [ -z "$CLIP_ID" ] && continue
-            RANK=$((RANK + 1))
-            TAG="clip-$CLIP_ID"
-            gh release create "$TAG" "work/$CLIP_ID.mp4" "work/$CLIP_ID.jpg" --title "CutCutAi · Top $RANK · $CLIP_ID" --notes "Corte Top $RANK gerado automaticamente pelo CutCutAi."
-            BASE="https://github.com/${{ github.repository }}/releases/download/$TAG"
-            python scripts/update_release_metadata.py --ranking data/ranking.json --clip "$CLIP_ID" --asset-url "$BASE/$CLIP_ID.mp4" --thumbnail-url "$BASE/$CLIP_ID.jpg" --tag "$TAG"
-          done
+          TAG="clip-$CLIP_ID"
+          gh release create "$TAG" "work/$CLIP_ID.mp4" "work/$CLIP_ID.jpg" --title "CutCutAi · Top 1 · $CLIP_ID" --notes "Corte Top 1 gerado automaticamente pelo CutCutAi."
+          BASE="https://github.com/${{ github.repository }}/releases/download/$TAG"
+          python scripts/update_release_metadata.py --ranking data/ranking.json --clip "$CLIP_ID" --asset-url "$BASE/$CLIP_ID.mp4" --thumbnail-url "$BASE/$CLIP_ID.jpg" --tag "$TAG"
+      - name: Criar Release 2
+        if: steps.result.outputs.clip2 != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLIP_ID: ${{ steps.result.outputs.clip2 }}
+        run: |
+          TAG="clip-$CLIP_ID"
+          gh release create "$TAG" "work/$CLIP_ID.mp4" "work/$CLIP_ID.jpg" --title "CutCutAi · Top 2 · $CLIP_ID" --notes "Corte Top 2 gerado automaticamente pelo CutCutAi."
+          BASE="https://github.com/${{ github.repository }}/releases/download/$TAG"
+          python scripts/update_release_metadata.py --ranking data/ranking.json --clip "$CLIP_ID" --asset-url "$BASE/$CLIP_ID.mp4" --thumbnail-url "$BASE/$CLIP_ID.jpg" --tag "$TAG"
+      - name: Criar Release 3
+        if: steps.result.outputs.clip3 != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLIP_ID: ${{ steps.result.outputs.clip3 }}
+        run: |
+          TAG="clip-$CLIP_ID"
+          gh release create "$TAG" "work/$CLIP_ID.mp4" "work/$CLIP_ID.jpg" --title "CutCutAi · Top 3 · $CLIP_ID" --notes "Corte Top 3 gerado automaticamente pelo CutCutAi."
+          BASE="https://github.com/${{ github.repository }}/releases/download/$TAG"
+          python scripts/update_release_metadata.py --ranking data/ranking.json --clip "$CLIP_ID" --asset-url "$BASE/$CLIP_ID.mp4" --thumbnail-url "$BASE/$CLIP_ID.jpg" --tag "$TAG"
       - name: Atualizar ranking
         run: |
           git config user.name "cutcutai-bot"
           git config user.email "actions@users.noreply.github.com"
           git add data/ranking.json
-          git commit -m "data: adicionar Top 3 cortes da live"
+          git commit -m "data: adicionar cortes Top 3 da live"
           git pull --rebase
           git push
       - name: Comentar resultado
