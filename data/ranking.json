@@ -1,5 +1,36 @@
 {
-  "generated_at": null,
-  "clips": []
+  "generated_at": "2026-09-02T02:59:49.403630+00:00",
+  "clips": [
+    {
+      "id": "a1050c1d734f",
+      "title": "Pois é, porra, eu não tenho interagindo, vai ficar aqui só por causa do Pix.",
+      "source_url": "https://vt.tiktok.com/ZS9Bt2M1MUcDs-Dvro4/",
+      "source_title": "Lets Go LIVE! 2026-09-02 02:56",
+      "created_at": "2026-09-02T02:59:49.355601+00:00",
+      "duration": 4.033333,
+      "score": 36.4,
+      "score_breakdown": {
+        "audio": 60.51,
+        "transcript": 20.5,
+        "scene": 30.0
+      },
+      "transcript": "Pois é, porra, eu não tenho interagindo, vai ficar aqui só por causa do Pix.",
+      "description": "Pois é, porra, eu não tenho interagindo, vai ficar aqui só por causa do Pix.",
+      "hashtags": [
+        "#viral",
+        "#cortes",
+        "#pois",
+        "#porra",
+        "#tenho",
+        "#interagindo",
+        "#ficar"
+      ],
+      "asset_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-a1050c1d734f/a1050c1d734f.mp4",
+      "thumbnail_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-a1050c1d734f/a1050c1d734f.jpg",
+      "release_tag": "clip-a1050c1d734f",
+      "reasons": [
+        "Pico de energia no áudio"
+      ]
+    }
+  ]
 }
-
