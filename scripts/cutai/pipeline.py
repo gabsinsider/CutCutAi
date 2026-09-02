@@ -17,7 +17,7 @@ from .transcription import transcribe
 from .validation import validate_source_url
 
 MIN_CLIP_SECONDS = 60.0
-MAX_CLIP_SECONDS = 90.0
+MAX_CLIP_SECONDS = 120.0
 RANKING_PATH = Path("data/ranking.json")
 
 
@@ -74,6 +74,10 @@ STORY_TERMS = {
     "agora", "resultado", "problema", "verdade", "segredo", "explicar",
     "entender", "motivo", "finalmente", "conseguiu", "ganhou", "perdeu",
 }
+CONTINUATION_ENDINGS = {
+    "e", "mas", "porque", "pois", "que", "quando", "então", "porém", "só",
+    "se", "como", "para", "pra", "de", "do", "da", "dos", "das", "com",
+}
 
 
 def _window_context_score(inside: list[dict], start: float, end: float) -> float:
@@ -82,25 +86,16 @@ def _window_context_score(inside: list[dict], start: float, end: float) -> float
     words = re.findall(r"[\wÀ-ÿ]+", normalized)
     if not words:
         return 0.0
-
-    speech_seconds = sum(
-        max(0.0, min(end, float(s.get("end", 0))) - max(start, float(s.get("start", 0))))
-        for s in inside
-    )
+    speech_seconds = sum(max(0.0, min(end, float(s.get("end", 0))) - max(start, float(s.get("start", 0)))) for s in inside)
     speech_ratio = speech_seconds / max(1.0, end - start)
     reaction_hits = sum(1 for phrase in REACTION_PHRASES if phrase in normalized)
     story_hits = sum(1 for term in STORY_TERMS if term in words)
     questions = text.count("?")
     emphasis = text.count("!")
-
-    # Prefer windows with enough spoken context, a hook/reaction and a progression
-    # of ideas. This avoids selecting silence or isolated keyword spikes.
     score = min(28.0, speech_ratio * 35.0)
     score += min(22.0, len(words) * 0.11)
     score += min(24.0, reaction_hits * 6.0 + emphasis * 2.0)
     score += min(18.0, story_hits * 2.5 + questions * 2.0)
-
-    # Reward a window whose interesting content is not concentrated only at an edge.
     midpoint = (start + end) / 2
     central = [s for s in inside if abs(((float(s.get("start", 0)) + float(s.get("end", 0))) / 2) - midpoint) <= 18]
     central_text = " ".join(str(s.get("text", "")).lower() for s in central)
@@ -121,12 +116,9 @@ def choose_top_centers(segments: list[dict], source_duration: float, clip_length
         inside = [s for s in segments if float(s.get("end", 0)) > start and float(s.get("start", 0)) < end]
         candidates.append((_window_context_score(inside, start, end), center))
         center += 5.0
-
     candidates.sort(reverse=True)
     selected: list[tuple[float, float]] = []
     for candidate in candidates:
-        # Top 3 should represent genuinely different moments, not three versions
-        # of the same passage.
         if all(abs(candidate[1] - chosen[1]) >= clip_length * 0.85 for chosen in selected):
             selected.append(candidate)
             if len(selected) == limit:
@@ -140,6 +132,18 @@ def choose_top_centers(segments: list[dict], source_duration: float, clip_length
     return selected or [(0.0, source_duration / 2)]
 
 
+def _looks_complete(text: str) -> bool:
+    text = text.strip()
+    if not text:
+        return False
+    last_word = re.findall(r"[\wÀ-ÿ]+", text.lower())
+    if not last_word:
+        return False
+    if last_word[-1] in CONTINUATION_ENDINGS:
+        return False
+    return text.endswith((".", "!", "?"))
+
+
 def choose_smart_range(segments: list[dict], center: float, source_duration: float) -> tuple[float, float]:
     core_start = max(0.0, center - MIN_CLIP_SECONDS / 2)
     core_end = min(source_duration, core_start + MIN_CLIP_SECONDS)
@@ -147,27 +151,43 @@ def choose_smart_range(segments: list[dict], center: float, source_duration: flo
     if not segments:
         return core_start, core_end
 
-    start, end = core_start, core_end
-    before = [s for s in segments if float(s.get("start", 0)) <= core_start and core_start - float(s.get("start", 0)) <= 12.0]
+    start = core_start
+    before = [s for s in segments if float(s.get("start", 0)) <= core_start and core_start - float(s.get("start", 0)) <= 15.0]
     if before:
         start = float(before[-1].get("start", core_start))
-    after = [s for s in segments if float(s.get("end", 0)) >= core_end and float(s.get("end", 0)) - core_end <= 18.0]
-    if after:
-        end = float(after[0].get("end", core_end))
+
+    # Nunca encerre apenas porque atingiu 60/90s. Continue até encontrar uma
+    # conclusão natural: pontuação terminal seguida de uma pequena pausa.
+    end = core_end
+    future = [s for s in segments if float(s.get("end", 0)) >= core_end]
+    for index, segment in enumerate(future):
+        candidate_end = float(segment.get("end", end))
+        if candidate_end - start > MAX_CLIP_SECONDS:
+            break
+        text = str(segment.get("text", "")).strip()
+        next_start = float(future[index + 1].get("start", candidate_end)) if index + 1 < len(future) else source_duration
+        pause = max(0.0, next_start - candidate_end)
+        end = candidate_end
+        if _looks_complete(text) and pause >= 0.35:
+            break
 
     if end - start < MIN_CLIP_SECONDS:
-        missing = MIN_CLIP_SECONDS - (end - start)
-        grow_after = min(missing, source_duration - end)
-        end += grow_after
-        start = max(0.0, start - (missing - grow_after))
+        end = min(source_duration, start + MIN_CLIP_SECONDS)
     if end - start > MAX_CLIP_SECONDS:
-        overflow = (end - start) - MAX_CLIP_SECONDS
-        start += overflow / 2
-        end -= overflow / 2
-    if end > source_duration:
-        end = source_duration
-        start = max(0.0, end - min(MAX_CLIP_SECONDS, max(MIN_CLIP_SECONDS, end - start)))
-    return start, end
+        end = min(source_duration, start + MAX_CLIP_SECONDS)
+
+    # Se o limite máximo cair dentro de uma fala, recue para a última conclusão
+    # detectável em vez de cortar uma frase pela metade.
+    if end < source_duration:
+        eligible = [s for s in segments if start + MIN_CLIP_SECONDS <= float(s.get("end", 0)) <= end]
+        completed = [s for s in eligible if _looks_complete(str(s.get("text", "")))]
+        if completed:
+            last = completed[-1]
+            last_end = float(last.get("end", end))
+            if end - last_end <= 8.0:
+                end = last_end
+
+    return max(0.0, start), min(source_duration, end)
 
 
 def process(url: str, workdir: Path, capture_seconds: int = 180) -> list[Clip]:
@@ -203,12 +223,10 @@ def process(url: str, workdir: Path, capture_seconds: int = 180) -> list[Clip]:
         t_score, t_reasons = transcript_score(transcript)
         s_score = scene_score(clip_path)
         base_score = combine_scores(a_score, t_score, s_score)
-        # Context is now part of the final ranking, while preserving the existing
-        # audio/transcript/scene quality signals.
         contextual_total = min(100.0, base_score.total * 0.70 + context_score * 0.30)
         base_score.total = round(contextual_total, 2)
         description, hashtags = suggest_metadata(transcript)
-        reasons = a_reasons + t_reasons + [f"contexto {context_score:.0f}/100", f"cena {s_score:.0f}/100", f"duração {end-start:.1f}s", "legendado"]
+        reasons = a_reasons + t_reasons + [f"contexto {context_score:.0f}/100", f"cena {s_score:.0f}/100", f"duração {end-start:.1f}s", "final natural", "legendado"]
         score_breakdown = {"audio": round(a_score, 2), "transcript": round(t_score, 2), "scene": round(s_score, 2), "context": round(context_score, 2)}
         clip = Clip(id=clip_id, title=source_title, source_title=source_title, score=base_score, score_breakdown=score_breakdown, duration=round(end-start, 2), source_url=url, asset_url="", thumbnail_url="", transcript=transcript, reasons=reasons, description=description, hashtags=hashtags, created_at=datetime.now(UTC).isoformat())
         upsert_clip(RANKING_PATH, clip)
