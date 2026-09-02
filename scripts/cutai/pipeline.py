@@ -17,10 +17,14 @@ from .validation import validate_source_url
 
 def download(url: str, output: Path, seconds: int) -> str:
     output.parent.mkdir(parents=True, exist_ok=True)
-    command = ["yt-dlp", "--no-playlist", "--no-progress", "--merge-output-format", "mp4",
+    command = ["yt-dlp", "--no-playlist", "--no-progress", "--impersonate", "chrome",
+               "--extractor-retries", "3", "--merge-output-format", "mp4",
                "--downloader", "ffmpeg", "--downloader-args", f"ffmpeg_i:-t {seconds}",
                "-f", "bv*[height<=1080]+ba/b[height<=1080]", "-o", str(output), "--print", "title", url]
-    result = subprocess.run(command, check=True, text=True, capture_output=True)
+    result = subprocess.run(command, text=True, capture_output=True)
+    if result.returncode:
+        detail = result.stderr.strip()[-3000:] or result.stdout.strip()[-3000:]
+        raise RuntimeError(f"yt-dlp não conseguiu acessar esta transmissão:\n{detail}")
     return result.stdout.strip().splitlines()[-1] if result.stdout.strip() else "Live"
 
 
@@ -64,4 +68,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
