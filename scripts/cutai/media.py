@@ -46,10 +46,12 @@ def scene_score(path: Path) -> float:
 def make_clip(source: Path, output: Path, center: float, length: int = 60) -> None:
     start = max(0.0, center - length / 2)
     output.parent.mkdir(parents=True, exist_ok=True)
-    run(["ffmpeg", "-y", "-ss", str(start), "-i", str(source), "-t", str(length),
-         "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-c:a", "aac", "-movflags", "+faststart", str(output)])
+    run(["ffmpeg", "-y", "-fflags", "+genpts+discardcorrupt", "-err_detect", "ignore_err",
+         "-i", str(source), "-ss", str(start), "-t", str(length),
+         "-vf", "fps=30", "-af", "aresample=async=1:first_pts=0", "-fps_mode:v", "cfr",
+         "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-c:a", "aac",
+         "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", str(output)])
 
 
 def thumbnail(source: Path, output: Path) -> None:
     run(["ffmpeg", "-y", "-ss", "2", "-i", str(source), "-frames:v", "1", "-vf", "scale=640:-2", str(output)])
-
