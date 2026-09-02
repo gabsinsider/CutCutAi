@@ -46,17 +46,22 @@ def make_clip_range(source: Path, output: Path, start: float, end: float) -> Non
     start = max(0.0, start)
     length = max(1.0, end - start)
     output.parent.mkdir(parents=True, exist_ok=True)
+    # Decode from the original timeline first and trim both streams with the same
+    # timestamps. This preserves the A/V relationship from the merged live capture.
+    # Reset timestamps only after trimming; async resampling then corrects tiny drift
+    # without independently shifting the voice against the picture.
     run([
         "ffmpeg", "-y", "-fflags", "+genpts+discardcorrupt", "-err_detect", "ignore_err",
-        "-ss", str(start), "-i", str(source), "-t", str(length),
-        "-map", "0:v:0", "-map", "0:a:0?",
-        "-vf", "setpts=PTS-STARTPTS,fps=30",
-        "-af", "asetpts=PTS-STARTPTS,aresample=async=1:min_hard_comp=0.100:first_pts=0",
+        "-i", str(source),
+        "-filter_complex",
+        f"[0:v:0]trim=start={start}:duration={length},setpts=PTS-STARTPTS,fps=30[v];"
+        f"[0:a:0]atrim=start={start}:duration={length},asetpts=PTS-STARTPTS,aresample=async=1:first_pts=0[a]",
+        "-map", "[v]", "-map", "[a]",
         "-fps_mode:v", "cfr",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
         "-profile:v", "high", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "192k",
-        "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", "-shortest", str(output),
+        "-movflags", "+faststart", "-shortest", str(output),
     ])
 
 
