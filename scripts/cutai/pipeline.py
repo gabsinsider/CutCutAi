@@ -20,7 +20,7 @@ def download(url: str, output: Path, seconds: int) -> str:
     command = ["yt-dlp", "--no-playlist", "--no-progress", "--impersonate", "chrome",
                "--extractor-retries", "3", "--merge-output-format", "mp4",
                "--downloader", "ffmpeg", "--downloader-args", f"ffmpeg_i:-t {seconds}",
-               "-f", "bv*[height<=1080]+ba/b[height<=1080]", "-o", str(output), "--print", "title", url]
+               "-f", "best[height<=1080]/best", "-o", str(output), "--print", "title", url]
     result = subprocess.run(command, text=True, capture_output=True)
     if result.returncode:
         detail = result.stderr.strip()[-3000:] or result.stdout.strip()[-3000:]
