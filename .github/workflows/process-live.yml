@@ -42,6 +42,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e '.[ai]'
           pip install 'yt-dlp[default,curl-cffi]'
+      - name: Preparar sessão protegida do YouTube
+        env:
+          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+        run: |
+          if [ -n "$YOUTUBE_COOKIES" ]; then
+            COOKIE_FILE="$RUNNER_TEMP/youtube-cookies.txt"
+            printf '%s' "$YOUTUBE_COOKIES" > "$COOKIE_FILE"
+            chmod 600 "$COOKIE_FILE"
+            echo "CUTAI_YOUTUBE_COOKIES_FILE=$COOKIE_FILE" >> "$GITHUB_ENV"
+            echo "Sessão do YouTube carregada com segurança."
+          else
+            echo "YOUTUBE_COOKIES não está configurado."
+          fi
       - name: Extrair link da Issue com segurança
         if: github.event_name == 'issues'
         id: issue
@@ -115,3 +128,6 @@ jobs:
           CLIP3: ${{ steps.result.outputs.clip3 }}
         run: |
           gh issue comment "${{ github.event.issue.number }}" --body "Top cortes concluídos - $CLIP1 $CLIP2 $CLIP3. O ranking foi atualizado no site."
+      - name: Limpar sessão do YouTube
+        if: always()
+        run: rm -f "$RUNNER_TEMP/youtube-cookies.txt"
