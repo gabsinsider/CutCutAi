@@ -1,5 +1,4 @@
 import re
-import shlex
 from urllib.parse import quote
 
 
@@ -11,9 +10,11 @@ def normalize_proxy_url(raw: str) -> str:
     if value.startswith(("http://", "https://", "socks4://", "socks5://")):
         return value
     if "--proxy" in value:
-        parts = shlex.split(value)
-        host = _option(parts, "--proxy")
-        credentials = _option(parts, "--proxy-user")
+        # Prefer regex because mobile copy/paste can leave unmatched quotes.
+        host_match = re.search(r"--proxy(?:=|\s+)[\"']?([^\s\"']+)", value)
+        credentials_match = re.search(r"--proxy-user(?:=|\s+)[\"']?([^\s\"']+)", value)
+        host = host_match.group(1) if host_match else ""
+        credentials = credentials_match.group(1) if credentials_match else ""
         if not host:
             raise ValueError("Comando de proxy sem host")
         if credentials:
@@ -39,4 +40,3 @@ def _option(parts: list[str], name: str) -> str:
         return parts[parts.index(name) + 1]
     except (ValueError, IndexError):
         return ""
-
