@@ -64,8 +64,7 @@ jobs:
         run: python -m cutai.pipeline --url "${{ steps.params.outputs.url }}" --capture-seconds "${{ steps.params.outputs.seconds }}" --workdir work
       - name: Ler resultado
         id: result
-        run: |
-          python scripts/export_top3_outputs.py work/result.json "$GITHUB_OUTPUT"
+        run: python scripts/export_top3_outputs.py work/result.json "$GITHUB_OUTPUT"
       - name: Criar Release 1
         if: steps.result.outputs.clip1 != ''
         env:
@@ -111,4 +110,5 @@ jobs:
           CLIP1: ${{ steps.result.outputs.clip1 }}
           CLIP2: ${{ steps.result.outputs.clip2 }}
           CLIP3: ${{ steps.result.outputs.clip3 }}
-        run: gh issue comment "${{ github.event.issue.number }}" --body "Top cortes concluídos: $CLIP1 $CLIP2 $CLIP3. O ranking foi atualizado no site."
+        run: |
+          gh issue comment "${{ github.event.issue.number }}" --body "Top cortes concluídos - $CLIP1 $CLIP2 $CLIP3. O ranking foi atualizado no site."
