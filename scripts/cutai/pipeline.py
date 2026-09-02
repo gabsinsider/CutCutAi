@@ -9,6 +9,7 @@ from pathlib import Path
 from .media import audio_metrics, duration, make_clip, scene_score, thumbnail
 from .metadata import suggest_metadata
 from .models import Clip
+from .proxy import normalize_proxy_url
 from .ranking import upsert_clip
 from .scoring import audio_score, combine_scores, transcript_score
 from .transcription import transcribe
@@ -22,7 +23,7 @@ def download(url: str, output: Path, seconds: int) -> str:
                "--extractor-args", "youtube:player_client=default,android;formats=missing_pot",
                "--downloader", "ffmpeg", "--downloader-args", f"ffmpeg_i:-t {seconds}",
                "-f", "best[height<=1080]/best", "-o", str(output), "--print", "title"]
-    proxy_url = os.getenv("CUTAI_PROXY_URL", "").strip()
+    proxy_url = normalize_proxy_url(os.getenv("CUTAI_PROXY_URL", ""))
     if proxy_url:
         command.extend(["--proxy", proxy_url])
     command.append(url)
