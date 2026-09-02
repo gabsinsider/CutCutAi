@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-02T05:50:03.598434+00:00",
+  "generated_at": "2026-09-02T05:59:30.296553+00:00",
   "clips": [
     {
       "id": "84c4427c50eb",
@@ -31,6 +31,39 @@
       "reasons": [
         "Pico de energia no áudio",
         "Linguagem emocional: agora, melhor, ninguém",
+        "Fala com ênfase"
+      ]
+    },
+    {
+      "id": "f19261df5888",
+      "title": "Trabalhar!",
+      "source_url": "https://www.youtube.com/live/KwIltUX1mZ4?feature=shared",
+      "source_title": "👽 MISSÕES NO MODO BEN: Aventura sem parar! 🚀🗺️ | Cartoon Network 2026-09-02 05:55",
+      "created_at": "2026-09-02T05:59:30.253754+00:00",
+      "duration": 60.02322,
+      "score": 71.12,
+      "score_breakdown": {
+        "audio": 67.3,
+        "transcript": 61.26,
+        "scene": 100.0
+      },
+      "transcript": "Trabalhar! Vamos ver a lista! Tem que ir para a cháquimo leque! Nossa, eu vou ver mesmo que eu limpe o para a chóqui chamou até de buleque! Coisas que eu faço para usar o Wi-Fi! Terepe, tereca! E aí? Isso tá mais do que limpo! Isso é uma máscara de palhasse! O que que você? Cadê o moleque feio? Feio? O que? Calma o segundo! Pra lhe se estes devastadas no meio do um enteste nuclear! Isso explica muito! Tem que exista? Encepto, talvez você trocada a montação? Quase? Nem para um genio um tapinhando as costas e um sacinho de amenduíns! Se você é uma cabeça em uma na no corpo de um encepto, quer dizer aqui! Alguém tem mômão zão aí! Faz e dois roubar o trailer! roubar! Venenos! Comentamos com o pesquero! E com a ideia pro seu bantar o bandireiro no meio da sua cabertinha! Não, esse é nós! É, é, é, é, é, é, é! E o que é de ter? Quer? Por quê? Todos meus meralhas que crupanhe, sem querer me acabar! É claro! Nossa, pelo jeito alguém ama enceptos! Nós vemos que aí direto no penhásco, se não fosse aquele ciclo a mistrâio! Ah, qual é? Ah, qual é? Uma só o minuto! Segundo isto aqui, estamos indo pro lado errado! Ah, está vendo pra baixo? Ah, é verdade! Continua! Bora do Palo de Canhão Bontar e Se Treim pra fora dos treinos! Por que você está tão agitado? Alta! É um disse que era pra você não beber tanto refrigerante! Ah, anda lá! Vai! Vai! Checa que eles encentos queerem qual a Tavela! É melhor descobrir antes que a Gwynion vou vou chegue! Ah, cara! Lata V!",
+      "description": "Trabalhar!",
+      "hashtags": [
+        "#viral",
+        "#cortes",
+        "#voce",
+        "#isso",
+        "#qual",
+        "#nossa",
+        "#feio"
+      ],
+      "asset_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-f19261df5888/f19261df5888.mp4",
+      "thumbnail_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-f19261df5888/f19261df5888.jpg",
+      "release_tag": "clip-f19261df5888",
+      "reasons": [
+        "Pico de energia no áudio",
+        "Linguagem emocional: melhor",
         "Fala com ênfase"
       ]
     },
