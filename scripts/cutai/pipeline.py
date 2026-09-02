@@ -37,8 +37,6 @@ def download(url: str, output: Path, seconds: int) -> str:
     cookie_file = os.getenv("CUTAI_YOUTUBE_COOKIES_FILE", "").strip()
     user_agent = os.getenv("CUTAI_YOUTUBE_USER_AGENT", "").strip()
 
-    # Tenta clientes diferentes do YouTube antes de desistir. Alguns IPs de datacenter
-    # recebem o desafio anti-bot apenas em determinados player clients.
     attempts = [
         "youtube:player_client=tv,web_safari;formats=missing_pot",
         "youtube:player_client=web_safari,android;formats=missing_pot",
@@ -173,7 +171,8 @@ def process(url: str, workdir: Path, capture_seconds: int = 180) -> list[Clip]:
         score = combine_scores(a_score, t_score, s_score)
         description, hashtags = suggest_metadata(transcript)
         reasons = a_reasons + t_reasons + [f"cena {s_score:.0f}/100", f"duração {end-start:.1f}s", "legendado"]
-        clip = Clip(id=clip_id, title=source_title, score=score, duration=round(end-start, 2), source_url=url, asset_url="", thumbnail_url="", transcript=transcript, reasons=reasons, description=description, hashtags=hashtags, created_at=datetime.now(UTC).isoformat())
+        score_breakdown = {"audio": round(a_score, 2), "transcript": round(t_score, 2), "scene": round(s_score, 2)}
+        clip = Clip(id=clip_id, title=source_title, source_title=source_title, score=score, score_breakdown=score_breakdown, duration=round(end-start, 2), source_url=url, asset_url="", thumbnail_url="", transcript=transcript, reasons=reasons, description=description, hashtags=hashtags, created_at=datetime.now(UTC).isoformat())
         upsert_clip(RANKING_PATH, clip)
         clips.append(clip)
     clips.sort(key=lambda c: c.score, reverse=True)
