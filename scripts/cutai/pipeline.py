@@ -18,7 +18,8 @@ from .validation import validate_source_url
 def download(url: str, output: Path, seconds: int) -> str:
     output.parent.mkdir(parents=True, exist_ok=True)
     command = ["yt-dlp", "--no-playlist", "--no-progress", "--no-simulate", "--impersonate", "chrome",
-               "--extractor-retries", "3",
+               "--extractor-retries", "3", "--js-runtimes", "node",
+               "--extractor-args", "youtube:player_client=default,android;formats=missing_pot",
                "--downloader", "ffmpeg", "--downloader-args", f"ffmpeg_i:-t {seconds}",
                "-f", "best[height<=1080]/best", "-o", str(output), "--print", "title", url]
     result = subprocess.run(command, text=True, capture_output=True)
