@@ -1,0 +1,15 @@
+[project]
+name = "cutcutai"
+version = "0.1.0"
+description = "Incremental live-stream highlight generator for GitHub Actions"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.26", "requests>=2.32"]
+
+[project.optional-dependencies]
+ai = ["faster-whisper>=1.1", "librosa>=0.10", "scenedetect[opencv]>=0.6"]
+test = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+pythonpath = ["scripts"]
+testpaths = ["tests"]
+

@@ -1,0 +1,16 @@
+name: Editar um corte
+description: Solicite uma nova renderização
+title: "[EDIT] "
+labels: ["edit-request"]
+body:
+  - type: input
+    id: clip
+    attributes: {label: ID do corte, placeholder: a1b2c3d4e5f6}
+    validations: {required: true}
+  - type: dropdown
+    id: filter
+    attributes: {label: Filtro, options: [Original, Vibrante, Cinematográfico, Preto e branco]}
+  - type: dropdown
+    id: resolution
+    attributes: {label: Resolução, options: [720p, 1080p, 2160p (4K — lento)]}
+

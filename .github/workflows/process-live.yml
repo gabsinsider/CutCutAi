@@ -1,0 +1,91 @@
+name: Processar live
+
+on:
+  issues:
+    types: [opened, labeled]
+  workflow_dispatch:
+    inputs:
+      live_url:
+        description: Link da transmissão
+        required: true
+        type: string
+      capture_seconds:
+        description: Segundos nesta captura (60–900)
+        required: false
+        default: "180"
+        type: string
+
+concurrency:
+  group: live-${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  process:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.issue.labels.*.name, 'live-request')
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Instalar ferramentas
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade pip
+          pip install -e '.[ai]'
+          pip install yt-dlp
+      - name: Extrair link da Issue com segurança
+        if: github.event_name == 'issues'
+        id: issue
+        run: python scripts/parse_issue.py
+      - name: Resolver parâmetros
+        id: params
+        env:
+          ISSUE_URL: ${{ steps.issue.outputs.url }}
+          INPUT_URL: ${{ inputs.live_url }}
+          INPUT_SECONDS: ${{ inputs.capture_seconds }}
+        run: |
+          URL="${INPUT_URL:-$ISSUE_URL}"
+          SECONDS="${INPUT_SECONDS:-180}"
+          if ! [[ "$SECONDS" =~ ^[0-9]+$ ]] || (( SECONDS < 60 || SECONDS > 900 )); then SECONDS=180; fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "seconds=$SECONDS" >> "$GITHUB_OUTPUT"
+      - name: Capturar, analisar e criar corte
+        env:
+          WHISPER_MODEL: tiny
+        run: python -m cutai.pipeline --url "${{ steps.params.outputs.url }}" --capture-seconds "${{ steps.params.outputs.seconds }}" --workdir work
+      - name: Ler resultado
+        id: result
+        run: |
+          echo "clip_id=$(python -c 'import json;print(json.load(open("work/result.json"))["id"])')" >> "$GITHUB_OUTPUT"
+          echo "score=$(python -c 'import json;print(json.load(open("work/result.json"))["score"])')" >> "$GITHUB_OUTPUT"
+      - name: Criar Release e enviar mídia
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLIP_ID: ${{ steps.result.outputs.clip_id }}
+        run: |
+          TAG="clip-$CLIP_ID"
+          gh release create "$TAG" "work/$CLIP_ID.mp4" "work/$CLIP_ID.jpg" --title "CutCutAi · $CLIP_ID" --notes-file work/result.json
+          BASE="https://github.com/${{ github.repository }}/releases/download/$TAG"
+          python scripts/update_release_metadata.py --ranking data/ranking.json --clip "$CLIP_ID" --asset-url "$BASE/$CLIP_ID.mp4" --thumbnail-url "$BASE/$CLIP_ID.jpg" --tag "$TAG"
+      - name: Atualizar ranking
+        run: |
+          git config user.name "cutcutai-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/ranking.json
+          git commit -m "data: adicionar corte ${{ steps.result.outputs.clip_id }}"
+          git pull --rebase
+          git push
+      - name: Comentar resultado
+        if: github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment "${{ github.event.issue.number }}" --body "Corte **${{ steps.result.outputs.clip_id }}** concluído com score **${{ steps.result.outputs.score }}**. O ranking será atualizado no site."
+

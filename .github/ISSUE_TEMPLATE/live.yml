@@ -1,0 +1,16 @@
+name: Processar uma live
+description: Envie uma transmissão para o pipeline do CutCutAi
+title: "[LIVE] "
+labels: ["live-request"]
+body:
+  - type: input
+    id: url
+    attributes:
+      label: Link da live
+      description: YouTube, Facebook, TikTok, Twitch ou outra fonte compatível com yt-dlp.
+      placeholder: https://youtube.com/live/...
+    validations: {required: true}
+  - type: markdown
+    attributes:
+      value: "O processamento usa minutos do GitHub Actions e acontece em segmentos, não em tempo real literal."
+
