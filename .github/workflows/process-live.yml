@@ -61,7 +61,8 @@ jobs:
           echo "seconds=$SECONDS" >> "$GITHUB_OUTPUT"
       - name: Capturar, analisar e criar Top 3
         env:
-          WHISPER_MODEL: tiny
+          WHISPER_MODEL: small
+          WHISPER_LANGUAGE: pt
           CUTAI_PROXY_URL: ${{ secrets.CUTAI_PROXY_URL }}
         run: python -m cutai.pipeline --url "${{ steps.params.outputs.url }}" --capture-seconds "${{ steps.params.outputs.seconds }}" --workdir work
       - name: Ler resultado
