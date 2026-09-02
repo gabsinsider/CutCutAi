@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-02T18:29:47.129538+00:00",
+  "generated_at": "2026-09-02T20:09:10.232242+00:00",
   "clips": [
     {
       "id": "ccc9bd6a8760",
@@ -664,6 +664,45 @@
       ]
     },
     {
+      "id": "5a6c1e2164fa",
+      "title": "🔴 Rick and Morty Brasil: Clipes das Temps. 1-3 | Melhores Momentos | Ao Vivo 2026-09-02 20:00",
+      "source_url": "https://www.youtube.com/live/mz__EMYpWPw?is=xadjmdVR_FDqbedl",
+      "source_title": "🔴 Rick and Morty Brasil: Clipes das Temps. 1-3 | Melhores Momentos | Ao Vivo 2026-09-02 20:00",
+      "created_at": "2026-09-02T20:08:10.349891+00:00",
+      "duration": 76.61,
+      "score": {
+        "audio": 55.82,
+        "transcript": 59.0,
+        "scene": 100.0,
+        "total": 69.66,
+        "reasons": []
+      },
+      "score_breakdown": {
+        "audio": 55.82,
+        "transcript": 59.0,
+        "scene": 100.0,
+        "context": 75.0
+      },
+      "transcript": "Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah! Ah Ah! Ah!",
+      "description": "Ah!",
+      "hashtags": [
+        "#viral",
+        "#cortes"
+      ],
+      "asset_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-5a6c1e2164fa/5a6c1e2164fa.mp4",
+      "thumbnail_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-5a6c1e2164fa/5a6c1e2164fa.jpg",
+      "release_tag": "clip-5a6c1e2164fa",
+      "reasons": [
+        "Pico de energia no áudio",
+        "Fala com ênfase",
+        "história 75/100",
+        "cena 100/100",
+        "duração 76.6s",
+        "final natural confirmado",
+        "legendado"
+      ]
+    },
+    {
       "id": "556e09f367b6",
       "title": "Então lá vem você de novo.",
       "source_url": "https://www.youtube.com/live/mz__EMYpWPw?is=xadjmdVR_FDqbedl",
@@ -771,6 +810,51 @@
         "Pico de energia no áudio",
         "Linguagem emocional: ninguém",
         "Fala com ênfase"
+      ]
+    },
+    {
+      "id": "5216a143fee3",
+      "title": "🔴 Rick and Morty Brasil: Clipes das Temps. 1-3 | Melhores Momentos | Ao Vivo 2026-09-02 20:00",
+      "source_url": "https://www.youtube.com/live/mz__EMYpWPw?is=xadjmdVR_FDqbedl",
+      "source_title": "🔴 Rick and Morty Brasil: Clipes das Temps. 1-3 | Melhores Momentos | Ao Vivo 2026-09-02 20:00",
+      "created_at": "2026-09-02T20:09:10.231348+00:00",
+      "duration": 100.8,
+      "score": {
+        "audio": 56.37,
+        "transcript": 66.65,
+        "scene": 100.0,
+        "total": 68.09,
+        "reasons": []
+      },
+      "score_breakdown": {
+        "audio": 56.37,
+        "transcript": 66.65,
+        "scene": 100.0,
+        "context": 65.64
+      },
+      "transcript": "Beleza, Mori. Vamos nessa. Por que você não aperta uma tecla num desses teclados e manda uma batida? Rick, por que a gente não pega a nossa família? Entra num portal e dá o fora daqui. Mori, música boa. Sai de pessoas que estão relaxadas. Aperta uma tecla aí, Mori. Me dá uma batida? Ai, caramba. Tá bom, beleza. Ah... Oh! Tem que ficar tranquileba. Fica tranquileba aqui. Tem que ficar tranquileba... Ficar tranquileba? Mas que diabos é isso? É, a moça é a melhor catada. É isso que é. Tira a calça e a calcinha. Caga no chão. Fica tranquileba aqui. Sou o senhor Budopado. Sou o senhor Budopado. Não analise, Nathan. Tá funcionando. Fica tranquileba aqui. E os dizimistas VIPsterão nosso passe de acesso completo pra toda a família. Fica a calcinha e fica tranquileba aqui. Isso que não se deve congelar o tempo é muita irresponsabilidade. E mesmo assim o geológico já se prepara em casa depois da festa? Ora, não temos tempo para apontar culpados. Mori, literalmente, não temos tempo. Ora, sua volta. Em certeza, é inerentemente insustentável. Eventualmente as coisas são ou não são. E nós temos umas quatro horas para sermos. Ou não seremos. Tá legal, uma vez que esse cristal do tempo existe em ambas as possibilidades e uma vez que é impossível ter errado algo, estou prestes a apertar esse botão nas duas possibilidades ao mesmo tempo. Como você sabe que... Veja lá o que estão perguntando. A resposta é que sou incrível. E lá, vamos nós!",
+      "description": "Beleza, Mori.",
+      "hashtags": [
+        "#viral",
+        "#cortes",
+        "#tranquileba",
+        "#fica",
+        "#tempo",
+        "#mori",
+        "#aqui"
+      ],
+      "asset_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-5216a143fee3/5216a143fee3.mp4",
+      "thumbnail_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-5216a143fee3/5216a143fee3.jpg",
+      "release_tag": "clip-5216a143fee3",
+      "reasons": [
+        "Pico de energia no áudio",
+        "Linguagem emocional: caramba, incrível, melhor",
+        "Fala com ênfase",
+        "história 66/100",
+        "cena 100/100",
+        "duração 100.8s",
+        "final natural confirmado",
+        "legendado"
       ]
     },
     {
