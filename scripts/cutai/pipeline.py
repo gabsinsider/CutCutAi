@@ -6,7 +6,7 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .media import audio_metrics, duration, make_clip_range, scene_score, thumbnail
+from .media import audio_metrics, burn_subtitles, duration, make_clip_range, scene_score, thumbnail
 from .metadata import suggest_metadata
 from .models import Clip
 from .proxy import normalize_proxy_url
@@ -122,16 +122,19 @@ def process(url: str, workdir: Path, capture_seconds: int = 180) -> list[Clip]:
     for rank, (window_score, center) in enumerate(centers, start=1):
         start, end = choose_smart_range(segments, center, source_duration)
         clip_id = hashlib.sha1(f"{url}-{datetime.now(UTC).isoformat()}-{rank}-{start:.3f}-{end:.3f}".encode()).hexdigest()[:12]
+        raw_clip_path = workdir / f"{clip_id}.raw.mp4"
         clip_path = workdir / f"{clip_id}.mp4"
         thumb_path = workdir / f"{clip_id}.jpg"
-        make_clip_range(source, clip_path, start, end)
-        thumbnail(clip_path, thumb_path)
+        make_clip_range(source, raw_clip_path, start, end)
         local_segments = []
         for segment in segments:
             seg_start = float(segment.get("start", 0))
             seg_end = float(segment.get("end", 0))
             if seg_end > start and seg_start < end:
                 local_segments.append({**segment, "start": max(0.0, seg_start - start), "end": min(end - start, seg_end - start)})
+        burn_subtitles(raw_clip_path, clip_path, local_segments)
+        raw_clip_path.unlink(missing_ok=True)
+        thumbnail(clip_path, thumb_path)
         transcript = " ".join(str(s.get("text", "")).strip() for s in local_segments).strip()
         mean_amp, peak_amp = audio_metrics(clip_path)
         a_score, a_reasons = audio_score(mean_amp, peak_amp)
@@ -141,7 +144,7 @@ def process(url: str, workdir: Path, capture_seconds: int = 180) -> list[Clip]:
         description, hashtags = suggest_metadata(transcript)
         clip_title = description[:80] if description else source_title[:80]
         reasons = list(score_data.reasons)
-        reasons.append(f"Top {rank}; janela inteligente {start:.1f}s–{end:.1f}s ({end-start:.1f}s); núcleo {window_score:.1f}")
+        reasons.append(f"Top {rank}; janela inteligente {start:.1f}s–{end:.1f}s ({end-start:.1f}s); núcleo {window_score:.1f}; legendado")
         clip = Clip(
             id=clip_id,
             title=clip_title,
