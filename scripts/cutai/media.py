@@ -49,7 +49,7 @@ def make_clip(source: Path, output: Path, center: float, length: int = 60) -> No
     run(["ffmpeg", "-y", "-fflags", "+genpts+discardcorrupt", "-err_detect", "ignore_err",
          "-i", str(source), "-ss", str(start), "-t", str(length),
          "-vf", "fps=30", "-af", "aresample=async=1:first_pts=0", "-fps_mode:v", "cfr",
-         "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-c:a", "aac",
+         "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",\n         "-profile:v", "high", "-pix_fmt", "yuv420p",\n         "-c:a", "aac", "-b:a", "192k",
          "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", str(output)])
 
 
