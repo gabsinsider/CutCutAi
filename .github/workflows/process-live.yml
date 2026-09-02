@@ -6,8 +6,9 @@ name: Processar live
   workflow_dispatch:
     inputs:
       live_url:
-        description: Link da transmissão
-        required: true
+        description: Link da transmissão (live 24h padrão já preenchida)
+        required: false
+        default: "https://www.youtube.com/live/mz__EMYpWPw?is=xadjmdVR_FDqbedl"
         type: string
       capture_seconds:
         description: Segundos nesta captura (60–900)
@@ -51,8 +52,9 @@ jobs:
           ISSUE_URL: ${{ steps.issue.outputs.url }}
           INPUT_URL: ${{ inputs.live_url }}
           INPUT_SECONDS: ${{ inputs.capture_seconds }}
+          DEFAULT_LIVE_URL: "https://www.youtube.com/live/mz__EMYpWPw?is=xadjmdVR_FDqbedl"
         run: |
-          URL="${INPUT_URL:-$ISSUE_URL}"
+          URL="${INPUT_URL:-${ISSUE_URL:-$DEFAULT_LIVE_URL}}"
           SECONDS="${INPUT_SECONDS:-180}"
           if ! [[ "$SECONDS" =~ ^[0-9]+$ ]] || (( SECONDS < 60 || SECONDS > 900 )); then SECONDS=180; fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
