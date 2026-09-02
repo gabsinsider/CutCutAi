@@ -10,7 +10,7 @@ on:
         required: true
         type: string
       capture_seconds:
-        description: Segundos nesta captura (60–900)
+        description: Segundos nesta captura (60-900)
         required: false
         default: "180"
         type: string
@@ -41,11 +41,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e '.[ai]'
           pip install 'yt-dlp[default,curl-cffi]'
-      - name: Extrair link da Issue com segurança
+      - name: Extrair link da Issue com seguranca
         if: github.event_name == 'issues'
         id: issue
         run: python scripts/parse_issue.py
-      - name: Resolver parâmetros
+      - name: Resolver parametros
         id: params
         env:
           ISSUE_URL: ${{ steps.issue.outputs.url }}
@@ -57,7 +57,7 @@ jobs:
           if ! [[ "$SECONDS" =~ ^[0-9]+$ ]] || (( SECONDS < 60 || SECONDS > 900 )); then SECONDS=180; fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "seconds=$SECONDS" >> "$GITHUB_OUTPUT"
-      - name: Capturar, analisar e criar Top 3
+      - name: Capturar analisar e criar Top 3
         env:
           WHISPER_MODEL: tiny
           CUTAI_PROXY_URL: ${{ secrets.CUTAI_PROXY_URL }}
@@ -65,27 +65,21 @@ jobs:
       - name: Ler resultado
         id: result
         run: |
-          echo "best_id=$(python -c 'import json;print(json.load(open("work/result.json"))["best_id"])')" >> "$GITHUB_OUTPUT"
-          echo "count=$(python -c 'import json;print(json.load(open("work/result.json"))["count"])')" >> "$GITHUB_OUTPUT"
-          echo "ids=$(python -c 'import json;print(" ".join(x["id"] for x in json.load(open("work/result.json"))["clips"]))')" >> "$GITHUB_OUTPUT"
-      - name: Criar Releases e enviar mídias
+          echo "count=$(python -c 'import json; print(json.load(open("work/result.json"))["count"])')" >> "$GITHUB_OUTPUT"
+          echo "ids=$(python -c 'import json; print(" ".join(x["id"] for x in json.load(open("work/result.json"))["clips"]))')" >> "$GITHUB_OUTPUT"
+      - name: Criar releases e enviar midias
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python - <<'PY'
-          import json, subprocess
-          from pathlib import Path
-          result = json.load(open('work/result.json', encoding='utf-8'))
-          repo = '${{ github.repository }}'
-          for rank, clip in enumerate(result['clips'], 1):
-              cid = clip['id']
-              tag = f'clip-{cid}'
-              notes = Path(f'work/{cid}-result.json')
-              notes.write_text(json.dumps(clip, ensure_ascii=False, indent=2), encoding='utf-8')
-              subprocess.run(['gh', 'release', 'create', tag, f'work/{cid}.mp4', f'work/{cid}.jpg', '--title', f'CutCutAi · Top {rank} · {cid}', '--notes-file', str(notes)], check=True)
-              base = f'https://github.com/{repo}/releases/download/{tag}'
-              subprocess.run(['python', 'scripts/update_release_metadata.py', '--ranking', 'data/ranking.json', '--clip', cid, '--asset-url', f'{base}/{cid}.mp4', '--thumbnail-url', f'{base}/{cid}.jpg', '--tag', tag], check=True)
-          PY
+          RANK=0
+          for CLIP_ID in ${{ steps.result.outputs.ids }}; do
+            RANK=$((RANK + 1))
+            TAG="clip-$CLIP_ID"
+            python -c "import json; d=json.load(open('work/result.json')); c=next(x for x in d['clips'] if x['id']=='$CLIP_ID'); open('work/release-notes.json','w').write(json.dumps(c,ensure_ascii=False,indent=2))"
+            gh release create "$TAG" "work/$CLIP_ID.mp4" "work/$CLIP_ID.jpg" --title "CutCutAi - Top $RANK - $CLIP_ID" --notes-file work/release-notes.json
+            BASE="https://github.com/${{ github.repository }}/releases/download/$TAG"
+            python scripts/update_release_metadata.py --ranking data/ranking.json --clip "$CLIP_ID" --asset-url "$BASE/$CLIP_ID.mp4" --thumbnail-url "$BASE/$CLIP_ID.jpg" --tag "$TAG"
+          done
       - name: Atualizar ranking
         run: |
           git config user.name "cutcutai-bot"
@@ -98,4 +92,4 @@ jobs:
         if: github.event_name == 'issues'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh issue comment "${{ github.event.issue.number }}" --body "Top **${{ steps.result.outputs.count }}** cortes concluídos. IDs: **${{ steps.result.outputs.ids }}**. O ranking foi atualizado no site."
+        run: gh issue comment "${{ github.event.issue.number }}" --body "Top ${{ steps.result.outputs.count }} cortes concluidos. IDs: ${{ steps.result.outputs.ids }}. O ranking foi atualizado no site."
