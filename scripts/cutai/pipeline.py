@@ -23,13 +23,16 @@ RANKING_PATH = Path("data/ranking.json")
 def download(url: str, output: Path, seconds: int) -> str:
     output.parent.mkdir(parents=True, exist_ok=True)
 
+    # Prefer adaptive 1080p video + best audio. yt-dlp hands both URLs to one ffmpeg
+    # process, preserving their original timestamps while clipping the same live window.
+    # Fall back to a muxed stream when adaptive formats are unavailable.
     base = [
         "yt-dlp", "--no-playlist", "--no-progress", "--no-simulate",
         "--impersonate", "chrome", "--extractor-retries", "5", "--fragment-retries", "5",
         "--retry-sleep", "extractor:2", "--js-runtimes", "node",
         "--downloader", "ffmpeg", "--downloader-args", f"ffmpeg_i:-t {seconds}",
         "--merge-output-format", "mkv",
-        "-f", "best[height<=1080][fps<=30]/best[height<=720][fps<=30]/best",
+        "-f", "bestvideo[height=1080][fps<=30]+bestaudio/bestvideo[height<=1080][fps<=30]+bestaudio/best[height<=1080][fps<=30]/best",
         "-o", str(output), "--print", "title",
     ]
 
