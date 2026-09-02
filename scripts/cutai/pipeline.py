@@ -21,7 +21,7 @@ def download(url: str, output: Path, seconds: int) -> str:
     command = ["yt-dlp", "--no-playlist", "--no-progress", "--no-simulate", "--impersonate", "chrome",
                "--extractor-retries", "3", "--js-runtimes", "node",
                "--extractor-args", "youtube:player_client=default,android;formats=missing_pot",
-               "--downloader", "ffmpeg", "--downloader-args", f"ffmpeg_i:-t {seconds}",
+               "--downloader", "ffmpeg", "--downloader-args", f"ffmpeg_i:-t {seconds}",\n               "--merge-output-format", "mkv",
                "-f", (
                    "bestvideo[height<=1080][fps<=30]+bestaudio/"
                    "best[height<=1080][fps<=30]/"
