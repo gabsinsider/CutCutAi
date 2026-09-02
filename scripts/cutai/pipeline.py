@@ -133,10 +133,11 @@ def process(url: str, workdir: Path, capture_seconds: int = 180) -> list[Clip]:
                 local_segments.append({**segment, "start": max(0.0, seg_start - start), "end": min(end - start, seg_end - start)})
         transcript = " ".join(str(s.get("text", "")).strip() for s in local_segments).strip()
         mean_amp, peak_amp = audio_metrics(clip_path)
-        a_score = audio_score(mean_amp, peak_amp)
-        t_score = transcript_score(transcript)
+        a_score, a_reasons = audio_score(mean_amp, peak_amp)
+        t_score, t_reasons = transcript_score(transcript)
         v_score = scene_score(clip_path)
-        score = combine_scores(a_score, t_score, v_score)
+        score_data = combine_scores(a_score, t_score, v_score, a_reasons + t_reasons)
+        score = score_data.total
         metadata = suggest_metadata(title, transcript)
         reason = f"Top {rank}; janela inteligente {start:.1f}s–{end:.1f}s ({end-start:.1f}s); núcleo {window_score:.1f}; áudio {a_score:.1f}; fala {t_score:.1f}; visual {v_score:.1f}"
         clip = Clip(id=clip_id, source_url=url, title=metadata["title"], duration_seconds=end-start, score=score, reason=reason, transcript=transcript, created_at=datetime.now(UTC).isoformat(), file=str(clip_path), thumbnail=str(thumb_path), hashtags=metadata["hashtags"])
