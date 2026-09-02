@@ -18,7 +18,7 @@ from .validation import validate_source_url
 
 MIN_CLIP_SECONDS = 60.0
 MAX_CLIP_SECONDS = 150.0
-DEFAULT_CAPTURE_SECONDS = 300
+DEFAULT_CAPTURE_SECONDS = 360
 RANKING_PATH = Path("data/ranking.json")
 
 
@@ -43,15 +43,25 @@ def download(url: str, output: Path, seconds: int) -> str:
 REACTION_PHRASES = {"meu deus", "não acredito", "que isso", "que loucura", "que absurdo", "olha isso", "olha só", "caramba", "nossa", "incrível", "absurdo", "sensacional", "impressionante", "histórico", "golaço", "gol"}
 STORY_TERMS = {"porque", "então", "mas", "porém", "aconteceu", "depois", "antes", "agora", "resultado", "problema", "verdade", "segredo", "explicar", "entender", "motivo", "finalmente", "conseguiu", "ganhou", "perdeu"}
 OPENING_TERMS = {"olha", "seguinte", "aconteceu", "começou", "primeiro", "hoje", "agora", "entenda", "explicar", "questão", "problema", "motivo"}
+RESET_TERMS = {"agora", "mudando", "seguinte", "outra", "outro", "próximo", "próxima", "falando", "voltando"}
+CONTINUATION_STARTS = {"e", "mas", "porque", "pois", "então", "porém", "aí", "ele", "ela", "eles", "elas", "isso", "esse", "essa", "também", "só"}
 CONTINUATION_ENDINGS = {"e", "mas", "porque", "pois", "que", "quando", "então", "porém", "só", "se", "como", "para", "pra", "de", "do", "da", "dos", "das", "com"}
-CONCLUSION_TERMS = {"enfim", "finalmente", "pronto", "acabou", "terminou", "resolveu", "resolvido", "conclusão", "concluindo", "fim"}
+CONCLUSION_TERMS = {"enfim", "finalmente", "pronto", "acabou", "terminou", "resolveu", "resolvido", "conclusão", "concluindo", "fim", "é isso", "foi isso", "ficou assim"}
+STOPWORDS = {"a","o","as","os","um","uma","de","da","do","das","dos","e","é","em","no","na","nos","nas","que","se","por","para","pra","com","como","mais","muito","já","não","sim","eu","você","vocês","ele","ela","eles","elas","isso","esse","essa","aí","foi","vai","tem","tá","está"}
 
 
 def _words(text: str) -> list[str]: return re.findall(r"[\wÀ-ÿ]+", text.lower())
+def _keywords(text: str) -> set[str]: return {w for w in _words(text) if len(w) >= 4 and w not in STOPWORDS}
 def _looks_complete(text: str) -> bool:
-    words = _words(text.strip()); return bool(words and words[-1] not in CONTINUATION_ENDINGS and text.strip().endswith((".", "!", "?")))
-def _has_conclusion(text: str) -> bool:
-    words = _words(text); return _looks_complete(text) and (any(term in words[-24:] for term in CONCLUSION_TERMS) or text.strip().endswith("!"))
+    words = _words(text.strip()); return bool(words and words[-1] not in CONTINUATION_ENDINGS and text.strip().endswith((".", "!")))
+def _explicit_conclusion(text: str) -> bool:
+    normalized = text.lower().strip(); return _looks_complete(text) and any(term in normalized[-180:] for term in CONCLUSION_TERMS)
+def _starts_as_continuation(text: str) -> bool:
+    words = _words(text); return bool(words and words[0] in CONTINUATION_STARTS)
+def _similarity(a: str, b: str) -> float:
+    ka, kb = _keywords(a), _keywords(b)
+    if not ka or not kb: return 0.0
+    return len(ka & kb) / max(1, min(len(ka), len(kb)))
 
 def _make_block(items: list[dict]) -> dict:
     return {"start": float(items[0].get("start", 0)), "end": float(items[-1].get("end", 0)), "segments": list(items), "text": " ".join(str(s.get("text", "")) for s in items).strip()}
@@ -61,8 +71,15 @@ def _topic_blocks(segments: list[dict], source_duration: float) -> list[dict]:
     blocks, current = [], []
     for segment in segments:
         if current:
-            gap = float(segment.get("start", 0)) - float(current[-1].get("end", 0)); elapsed = float(current[-1].get("end", 0)) - float(current[0].get("start", 0))
-            if gap >= 1.8 or (elapsed >= 40.0 and gap >= 0.9): blocks.append(_make_block(current)); current = []
+            gap = float(segment.get("start", 0)) - float(current[-1].get("end", 0))
+            elapsed = float(current[-1].get("end", 0)) - float(current[0].get("start", 0))
+            recent = " ".join(str(s.get("text", "")) for s in current[-5:])
+            incoming = str(segment.get("text", ""))
+            first = set(_words(incoming)[:4])
+            semantic_reset = bool(first & RESET_TERMS) and _similarity(recent, incoming) < .18
+            long_pause_reset = gap >= 2.2 and _similarity(recent, incoming) < .12
+            if (elapsed >= 35.0 and semantic_reset) or long_pause_reset:
+                blocks.append(_make_block(current)); current = []
         current.append(segment)
     if current: blocks.append(_make_block(current))
     return blocks
@@ -70,64 +87,66 @@ def _topic_blocks(segments: list[dict], source_duration: float) -> list[dict]:
 def _block_score(block: dict) -> float:
     text = block["text"]; normalized = text.lower(); words = _words(text); duration_s = max(1.0, block["end"] - block["start"])
     reaction_hits = sum(1 for p in REACTION_PHRASES if p in normalized); story_hits = sum(1 for t in STORY_TERMS if t in words)
-    return min(100.0, min(30.0, len(words)*0.13) + min(25.0, reaction_hits*7 + text.count("!")*2) + min(25.0, story_hits*2.8 + text.count("?")*2.5) + min(15.0, duration_s*0.25) + (5 if _looks_complete(text) else 0))
+    return min(100.0, min(30.0, len(words)*0.13) + min(25.0, reaction_hits*7 + text.count("!")*2) + min(25.0, story_hits*2.8) + min(15.0, duration_s*0.25) + (5 if _looks_complete(text) else 0))
 
 def _context_range(blocks: list[dict], index: int, source_duration: float) -> tuple[float, float]:
     main = blocks[index]; start = main["start"]; end = main["end"]
-    if index > 0:
-        previous = blocks[index-1]; gap = start - previous["end"]
-        first_words = set(_words(main["text"])[:12])
-        needs_setup = end-start < 50.0 or gap < 1.2 or not (first_words & OPENING_TERMS)
-        if needs_setup and end-previous["start"] <= MAX_CLIP_SECONDS: start = previous["start"]
+    # Não começar com frase que claramente depende do que veio antes.
+    if index > 0 and (_starts_as_continuation(main["text"]) or main["start"] < 12.0):
+        previous = blocks[index-1]
+        if end-previous["start"] <= MAX_CLIP_SECONDS: start = previous["start"]
     cursor = index + 1
-    while cursor < len(blocks) and end-start < MIN_CLIP_SECONDS:
+    while cursor < len(blocks):
+        elapsed = end-start
+        current = blocks[cursor-1]
         nxt = blocks[cursor]
-        if nxt["end"]-start > MAX_CLIP_SECONDS: break
+        gap = nxt["start"]-end
+        cohesion = _similarity(current["text"], nxt["text"])
+        next_reset = bool(set(_words(nxt["text"])[:5]) & RESET_TERMS)
+        # Só termina quando há evidência de que o assunto realmente acabou:
+        # conclusão explícita OU começo claro de um novo tópico com baixa coesão.
+        concluded = _explicit_conclusion(current["text"])
+        topic_changed = elapsed >= MIN_CLIP_SECONDS and next_reset and cohesion < .16 and gap >= .45
+        if elapsed >= MIN_CLIP_SECONDS and (concluded or topic_changed): break
+        if nxt["end"]-start > MAX_CLIP_SECONDS: return start, end
         end = nxt["end"]; cursor += 1
-    while cursor < len(blocks) and end-start < MAX_CLIP_SECONDS:
-        current_text = blocks[cursor-1]["text"] if cursor else main["text"]; gap = blocks[cursor]["start"]-end
-        if _has_conclusion(current_text) and gap >= .6: break
-        if _looks_complete(current_text) and gap >= 2.5: break
-        nxt = blocks[cursor]
-        if nxt["end"]-start > MAX_CLIP_SECONDS: break
-        end = nxt["end"]; cursor += 1
-    if end-start < MIN_CLIP_SECONDS:
-        start = max(0.0, start-min(12.0, MIN_CLIP_SECONDS-(end-start))); end = min(source_duration, max(end, start+MIN_CLIP_SECONDS))
     return max(0.0,start), min(source_duration,min(end,start+MAX_CLIP_SECONDS))
 
 def _range_has_ending(blocks: list[dict], start: float, end: float, source_duration: float) -> bool:
+    if end-start < MIN_CLIP_SECONDS or source_duration-end < 35.0: return False
     included = [b for b in blocks if b["end"] > start and b["start"] < end]
     if not included: return False
     last = included[-1]
-    if source_duration - end < 30.0: return False
-    if _has_conclusion(last["text"]): return True
-    next_blocks = [b for b in blocks if b["start"] >= end - 0.1]
-    next_gap = (next_blocks[0]["start"] - end) if next_blocks else (source_duration - end)
-    return _looks_complete(last["text"]) and next_gap >= 2.5
+    if _explicit_conclusion(last["text"]): return True
+    following = next((b for b in blocks if b["start"] >= end-.1), None)
+    if not following: return False
+    cohesion = _similarity(last["text"], following["text"])
+    reset = bool(set(_words(following["text"])[:5]) & RESET_TERMS)
+    return _looks_complete(last["text"]) and reset and cohesion < .16 and following["start"]-end >= .45
 
 def _story_quality(blocks: list[dict], index: int, start: float, end: float, source_duration: float) -> float:
-    main = blocks[index]; first_words = set(_words(main["text"])[:15]); quality = _block_score(main)
-    if first_words & OPENING_TERMS: quality += 10
-    if _range_has_ending(blocks,start,end,source_duration): quality += 20
-    else: quality -= 45
+    main=blocks[index]; quality=_block_score(main); first=_words(main["text"])[:8]
+    if set(first) & OPENING_TERMS: quality += 10
+    if _starts_as_continuation(main["text"]): quality -= 25
+    if _range_has_ending(blocks,start,end,source_duration): quality += 30
+    else: quality -= 60
     if end-start >= MIN_CLIP_SECONDS: quality += 5
-    if source_duration-end < 30.0: quality -= 35
-    elif source_duration-end < 45.0: quality -= 15
-    if main["start"] < 8.0: quality -= 15
-    return max(0.0, min(100.0, quality))
+    if source_duration-end < 45.0: quality -= 30
+    if start < 10.0: quality -= 20
+    return max(0.0,min(100.0,quality))
 
 def choose_top_ranges(segments: list[dict], source_duration: float, limit: int=3) -> list[tuple[float,float,float]]:
-    blocks = _topic_blocks(segments, source_duration)
+    blocks=_topic_blocks(segments,source_duration)
     if not blocks: return []
     candidates=[]
-    for i, block in enumerate(blocks):
+    for i in range(len(blocks)):
         start,end=_context_range(blocks,i,source_duration)
-        if not _range_has_ending(blocks,start,end,source_duration): continue
+        if end-start > MAX_CLIP_SECONDS or not _range_has_ending(blocks,start,end,source_duration): continue
         candidates.append((_story_quality(blocks,i,start,end,source_duration),start,end))
-    candidates.sort(key=lambda x:x[0], reverse=True); selected=[]
+    candidates.sort(key=lambda x:x[0],reverse=True); selected=[]
     for candidate in candidates:
         _,start,end=candidate
-        if any(max(0.0,min(end,ce)-max(start,cs))/max(1.0,min(end-start,ce-cs)) > .25 for _,cs,ce in selected): continue
+        if any(max(0.0,min(end,ce)-max(start,cs))/max(1.0,min(end-start,ce-cs))>.25 for _,cs,ce in selected): continue
         selected.append(candidate)
         if len(selected)==limit: break
     return selected
@@ -137,7 +156,7 @@ def process(url: str, workdir: Path, capture_seconds: int=DEFAULT_CAPTURE_SECOND
     source_title=download(url,source,max(60,min(capture_seconds,900))); source_duration=duration(source)
     if source_duration<MIN_CLIP_SECONDS: raise RuntimeError(f"A plataforma entregou somente {source_duration:.1f}s utilizáveis. São necessários pelo menos 60s para publicar um corte.")
     _,segments=transcribe(source); ranges=choose_top_ranges(segments,source_duration,3); clips=[]
-    if not ranges: raise RuntimeError("Nenhum assunto com início, desenvolvimento e desfecho confirmado foi encontrado nesta captura. O sistema recusou gerar um corte incompleto.")
+    if not ranges: raise RuntimeError("Nenhuma história autocontida com conclusão semântica foi encontrada. O sistema recusou cortar um assunto antes do desfecho.")
     for rank,(context_score,start,end) in enumerate(ranges,1):
         clip_id=hashlib.sha1(f"{url}:{datetime.now(UTC).isoformat()}:{rank}".encode()).hexdigest()[:12]; raw=workdir/f"{clip_id}.raw.mp4"; clip_path=workdir/f"{clip_id}.mp4"; thumb=workdir/f"{clip_id}.jpg"
         make_clip_range(source,raw,start,end); local=[]
@@ -145,7 +164,7 @@ def process(url: str, workdir: Path, capture_seconds: int=DEFAULT_CAPTURE_SECOND
             ss=float(s.get("start",0)); se=float(s.get("end",0))
             if se>start and ss<end: local.append({"start":max(0.0,ss-start),"end":min(end-start,se-start),"text":str(s.get("text",""))})
         burn_subtitles(raw,clip_path,local); raw.unlink(missing_ok=True); thumbnail(clip_path,thumb); transcript=" ".join(s["text"] for s in local).strip(); mean,peak=audio_metrics(clip_path); a_score,a_reasons=audio_score(mean,peak); t_score,t_reasons=transcript_score(transcript); s_score=scene_score(clip_path); base=combine_scores(a_score,t_score,s_score); base.total=round(min(100.0,base.total*.60+context_score*.40),2); description,hashtags=suggest_metadata(transcript)
-        reasons=a_reasons+t_reasons+[f"história {context_score:.0f}/100",f"cena {s_score:.0f}/100",f"duração {end-start:.1f}s","desfecho confirmado","legendado"]; breakdown={"audio":round(a_score,2),"transcript":round(t_score,2),"scene":round(s_score,2),"context":round(context_score,2)}
+        reasons=a_reasons+t_reasons+[f"história {context_score:.0f}/100",f"cena {s_score:.0f}/100",f"duração {end-start:.1f}s","conclusão semântica confirmada","legendado"]; breakdown={"audio":round(a_score,2),"transcript":round(t_score,2),"scene":round(s_score,2),"context":round(context_score,2)}
         clip=Clip(id=clip_id,title=source_title,source_title=source_title,score=base,score_breakdown=breakdown,duration=round(end-start,2),source_url=url,asset_url="",thumbnail_url="",transcript=transcript,reasons=reasons,description=description,hashtags=hashtags,created_at=datetime.now(UTC).isoformat()); upsert_clip(RANKING_PATH,clip); clips.append(clip)
     clips.sort(key=lambda c:c.score.total,reverse=True); return clips[:3]
 
