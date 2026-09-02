@@ -14,3 +14,7 @@ def test_converts_curl_snippet():
     value = normalize_proxy_url("curl --proxy brd.example:33335 --proxy-user user:pass https://example.com")
     assert value == "http://user:pass@brd.example:33335"
 
+
+def test_converts_curl_snippet_with_unmatched_quote():
+    value = normalize_proxy_url("curl --proxy 'brd.example:33335 --proxy-user user:pass")
+    assert value == "http://user:pass@brd.example:33335"
