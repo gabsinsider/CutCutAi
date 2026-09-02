@@ -2,7 +2,7 @@ name: Processar live
 
 on:
   issues:
-    types: [opened, labeled]
+    types: [opened, reopened, labeled]
   workflow_dispatch:
     inputs:
       live_url:
