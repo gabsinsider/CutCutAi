@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-02T02:59:49.403630+00:00",
+  "generated_at": "2026-09-02T03:06:48.296660+00:00",
   "clips": [
     {
       "id": "a1050c1d734f",
@@ -28,6 +28,36 @@
       "asset_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-a1050c1d734f/a1050c1d734f.mp4",
       "thumbnail_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-a1050c1d734f/a1050c1d734f.jpg",
       "release_tag": "clip-a1050c1d734f",
+      "reasons": [
+        "Pico de energia no áudio"
+      ]
+    },
+    {
+      "id": "ccd48bc12422",
+      "title": "Eu vou te dar isso a minha Achei aqui Ai, isso...",
+      "source_url": "https://vt.tiktok.com/ZS9BtMaYXw3J3-YERKb/",
+      "source_title": "warzone novo mw4 beta 2026-09-02 03:03",
+      "created_at": "2026-09-02T03:06:48.244194+00:00",
+      "duration": 5.982,
+      "score": 31.7,
+      "score_breakdown": {
+        "audio": 47.92,
+        "transcript": 19.83,
+        "scene": 30.0
+      },
+      "transcript": "Eu vou te dar isso a minha Achei aqui Ai, isso...",
+      "description": "Eu vou te dar isso a minha Achei aqui Ai, isso...",
+      "hashtags": [
+        "#viral",
+        "#cortes",
+        "#isso",
+        "#minha",
+        "#achei",
+        "#aqui"
+      ],
+      "asset_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-ccd48bc12422/ccd48bc12422.mp4",
+      "thumbnail_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-ccd48bc12422/ccd48bc12422.jpg",
+      "release_tag": "clip-ccd48bc12422",
       "reasons": [
         "Pico de energia no áudio"
       ]
