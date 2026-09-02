@@ -44,14 +44,14 @@ REACTION_PHRASES = {"meu deus", "não acredito", "que isso", "que loucura", "que
 STORY_TERMS = {"porque", "então", "mas", "porém", "aconteceu", "depois", "antes", "agora", "resultado", "problema", "verdade", "segredo", "explicar", "entender", "motivo", "finalmente", "conseguiu", "ganhou", "perdeu"}
 OPENING_TERMS = {"olha", "seguinte", "aconteceu", "começou", "primeiro", "hoje", "agora", "entenda", "explicar", "questão", "problema", "motivo"}
 CONTINUATION_ENDINGS = {"e", "mas", "porque", "pois", "que", "quando", "então", "porém", "só", "se", "como", "para", "pra", "de", "do", "da", "dos", "das", "com"}
-CONCLUSION_TERMS = {"enfim", "finalmente", "pronto", "acabou", "terminou", "resolveu", "resolvido", "resultado", "conclusão", "concluindo", "fim", "ganhou", "perdeu", "conseguiu"}
+CONCLUSION_TERMS = {"enfim", "finalmente", "pronto", "acabou", "terminou", "resolveu", "resolvido", "conclusão", "concluindo", "fim"}
 
 
 def _words(text: str) -> list[str]: return re.findall(r"[\wÀ-ÿ]+", text.lower())
 def _looks_complete(text: str) -> bool:
     words = _words(text.strip()); return bool(words and words[-1] not in CONTINUATION_ENDINGS and text.strip().endswith((".", "!", "?")))
 def _has_conclusion(text: str) -> bool:
-    words = _words(text); return _looks_complete(text) and (any(term in words[-24:] for term in CONCLUSION_TERMS) or text.strip().endswith(("!", "?")))
+    words = _words(text); return _looks_complete(text) and (any(term in words[-24:] for term in CONCLUSION_TERMS) or text.strip().endswith("!"))
 
 def _make_block(items: list[dict]) -> dict:
     return {"start": float(items[0].get("start", 0)), "end": float(items[-1].get("end", 0)), "segments": list(items), "text": " ".join(str(s.get("text", "")) for s in items).strip()}
@@ -87,7 +87,7 @@ def _context_range(blocks: list[dict], index: int, source_duration: float) -> tu
     while cursor < len(blocks) and end-start < MAX_CLIP_SECONDS:
         current_text = blocks[cursor-1]["text"] if cursor else main["text"]; gap = blocks[cursor]["start"]-end
         if _has_conclusion(current_text) and gap >= .6: break
-        if _looks_complete(current_text) and gap >= 2.0: break
+        if _looks_complete(current_text) and gap >= 2.5: break
         nxt = blocks[cursor]
         if nxt["end"]-start > MAX_CLIP_SECONDS: break
         end = nxt["end"]; cursor += 1
@@ -95,37 +95,49 @@ def _context_range(blocks: list[dict], index: int, source_duration: float) -> tu
         start = max(0.0, start-min(12.0, MIN_CLIP_SECONDS-(end-start))); end = min(source_duration, max(end, start+MIN_CLIP_SECONDS))
     return max(0.0,start), min(source_duration,min(end,start+MAX_CLIP_SECONDS))
 
+def _range_has_ending(blocks: list[dict], start: float, end: float, source_duration: float) -> bool:
+    included = [b for b in blocks if b["end"] > start and b["start"] < end]
+    if not included: return False
+    last = included[-1]
+    if source_duration - end < 30.0: return False
+    if _has_conclusion(last["text"]): return True
+    next_blocks = [b for b in blocks if b["start"] >= end - 0.1]
+    next_gap = (next_blocks[0]["start"] - end) if next_blocks else (source_duration - end)
+    return _looks_complete(last["text"]) and next_gap >= 2.5
+
 def _story_quality(blocks: list[dict], index: int, start: float, end: float, source_duration: float) -> float:
     main = blocks[index]; first_words = set(_words(main["text"])[:15]); quality = _block_score(main)
     if first_words & OPENING_TERMS: quality += 10
-    if _has_conclusion(main["text"]): quality += 10
+    if _range_has_ending(blocks,start,end,source_duration): quality += 20
+    else: quality -= 45
     if end-start >= MIN_CLIP_SECONDS: quality += 5
-    # Penaliza candidatos encostados no fim da captura: podem estar sem o desfecho real.
-    if source_duration-end < 20.0: quality -= 25
-    elif source_duration-end < 40.0: quality -= 10
-    # Penaliza assunto principal iniciado logo no começo da amostra, pois contexto anterior pode estar ausente.
+    if source_duration-end < 30.0: quality -= 35
+    elif source_duration-end < 45.0: quality -= 15
     if main["start"] < 8.0: quality -= 15
     return max(0.0, min(100.0, quality))
 
 def choose_top_ranges(segments: list[dict], source_duration: float, limit: int=3) -> list[tuple[float,float,float]]:
     blocks = _topic_blocks(segments, source_duration)
-    if not blocks: return [(50.0,0.0,min(source_duration,max(MIN_CLIP_SECONDS,source_duration)))]
+    if not blocks: return []
     candidates=[]
     for i, block in enumerate(blocks):
-        start,end=_context_range(blocks,i,source_duration); candidates.append((_story_quality(blocks,i,start,end,source_duration),start,end))
+        start,end=_context_range(blocks,i,source_duration)
+        if not _range_has_ending(blocks,start,end,source_duration): continue
+        candidates.append((_story_quality(blocks,i,start,end,source_duration),start,end))
     candidates.sort(key=lambda x:x[0], reverse=True); selected=[]
     for candidate in candidates:
         _,start,end=candidate
         if any(max(0.0,min(end,ce)-max(start,cs))/max(1.0,min(end-start,ce-cs)) > .25 for _,cs,ce in selected): continue
         selected.append(candidate)
         if len(selected)==limit: break
-    return selected or [candidates[0]]
+    return selected
 
 def process(url: str, workdir: Path, capture_seconds: int=DEFAULT_CAPTURE_SECONDS) -> list[Clip]:
     validate_source_url(url); workdir.mkdir(parents=True,exist_ok=True); source=workdir/"capture.mkv"
     source_title=download(url,source,max(60,min(capture_seconds,900))); source_duration=duration(source)
     if source_duration<MIN_CLIP_SECONDS: raise RuntimeError(f"A plataforma entregou somente {source_duration:.1f}s utilizáveis. São necessários pelo menos 60s para publicar um corte.")
     _,segments=transcribe(source); ranges=choose_top_ranges(segments,source_duration,3); clips=[]
+    if not ranges: raise RuntimeError("Nenhum assunto com início, desenvolvimento e desfecho confirmado foi encontrado nesta captura. O sistema recusou gerar um corte incompleto.")
     for rank,(context_score,start,end) in enumerate(ranges,1):
         clip_id=hashlib.sha1(f"{url}:{datetime.now(UTC).isoformat()}:{rank}".encode()).hexdigest()[:12]; raw=workdir/f"{clip_id}.raw.mp4"; clip_path=workdir/f"{clip_id}.mp4"; thumb=workdir/f"{clip_id}.jpg"
         make_clip_range(source,raw,start,end); local=[]
@@ -133,7 +145,7 @@ def process(url: str, workdir: Path, capture_seconds: int=DEFAULT_CAPTURE_SECOND
             ss=float(s.get("start",0)); se=float(s.get("end",0))
             if se>start and ss<end: local.append({"start":max(0.0,ss-start),"end":min(end-start,se-start),"text":str(s.get("text",""))})
         burn_subtitles(raw,clip_path,local); raw.unlink(missing_ok=True); thumbnail(clip_path,thumb); transcript=" ".join(s["text"] for s in local).strip(); mean,peak=audio_metrics(clip_path); a_score,a_reasons=audio_score(mean,peak); t_score,t_reasons=transcript_score(transcript); s_score=scene_score(clip_path); base=combine_scores(a_score,t_score,s_score); base.total=round(min(100.0,base.total*.60+context_score*.40),2); description,hashtags=suggest_metadata(transcript)
-        reasons=a_reasons+t_reasons+[f"história {context_score:.0f}/100",f"cena {s_score:.0f}/100",f"duração {end-start:.1f}s","início, desenvolvimento e desfecho","legendado"]; breakdown={"audio":round(a_score,2),"transcript":round(t_score,2),"scene":round(s_score,2),"context":round(context_score,2)}
+        reasons=a_reasons+t_reasons+[f"história {context_score:.0f}/100",f"cena {s_score:.0f}/100",f"duração {end-start:.1f}s","desfecho confirmado","legendado"]; breakdown={"audio":round(a_score,2),"transcript":round(t_score,2),"scene":round(s_score,2),"context":round(context_score,2)}
         clip=Clip(id=clip_id,title=source_title,source_title=source_title,score=base,score_breakdown=breakdown,duration=round(end-start,2),source_url=url,asset_url="",thumbnail_url="",transcript=transcript,reasons=reasons,description=description,hashtags=hashtags,created_at=datetime.now(UTC).isoformat()); upsert_clip(RANKING_PATH,clip); clips.append(clip)
     clips.sort(key=lambda c:c.score.total,reverse=True); return clips[:3]
 
