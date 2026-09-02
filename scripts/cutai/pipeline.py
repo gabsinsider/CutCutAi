@@ -21,7 +21,8 @@ def download(url: str, output: Path, seconds: int) -> str:
     command = ["yt-dlp", "--no-playlist", "--no-progress", "--no-simulate", "--impersonate", "chrome",
                "--extractor-retries", "3", "--js-runtimes", "node",
                "--extractor-args", "youtube:player_client=default,android;formats=missing_pot",
-               "--downloader", "ffmpeg", "--downloader-args", f"ffmpeg_i:-t {seconds}",\n               "--merge-output-format", "mkv",
+               "--downloader", "ffmpeg", "--downloader-args", f"ffmpeg_i:-t {seconds}",
+               "--merge-output-format", "mkv",
                "-f", (
                    "bestvideo[height<=1080][fps<=30]+bestaudio/"
                    "best[height<=1080][fps<=30]/"
@@ -43,8 +44,8 @@ def download(url: str, output: Path, seconds: int) -> str:
 
 def process(url: str, workdir: Path, ranking_path: Path, capture_seconds: int = 180) -> Clip:
     url, _ = validate_source_url(url)
-    # MPEG-TS tolerates timestamp discontinuities common in TikTok/HLS lives.
-    source = workdir / "capture.ts"
+    # MKV safely contains separate 1080p video/audio streams and tolerates live timestamps.
+    source = workdir / "capture.mkv"
     source_title = download(url, source, min(max(capture_seconds, 60), 900))
     source_duration = duration(source)
     if source_duration < 45:
