@@ -18,7 +18,7 @@ from .validation import validate_source_url
 def download(url: str, output: Path, seconds: int) -> str:
     output.parent.mkdir(parents=True, exist_ok=True)
     command = ["yt-dlp", "--no-playlist", "--no-progress", "--no-simulate", "--impersonate", "chrome",
-               "--extractor-retries", "3", "--merge-output-format", "mp4",
+               "--extractor-retries", "3",
                "--downloader", "ffmpeg", "--downloader-args", f"ffmpeg_i:-t {seconds}",
                "-f", "best[height<=1080]/best", "-o", str(output), "--print", "title", url]
     result = subprocess.run(command, text=True, capture_output=True)
@@ -30,8 +30,15 @@ def download(url: str, output: Path, seconds: int) -> str:
 
 def process(url: str, workdir: Path, ranking_path: Path, capture_seconds: int = 180) -> Clip:
     url, _ = validate_source_url(url)
-    source = workdir / "capture.mp4"
+    # MPEG-TS tolerates timestamp discontinuities common in TikTok/HLS lives.
+    source = workdir / "capture.ts"
     source_title = download(url, source, min(max(capture_seconds, 60), 900))
+    source_duration = duration(source)
+    if source_duration < 45:
+        raise RuntimeError(
+            f"A plataforma entregou somente {source_duration:.1f}s utilizáveis. "
+            "O corte não será publicado; tente uma live estável e ativa."
+        )
     transcript, _ = transcribe(source, os.getenv("WHISPER_MODEL", "tiny"))
     rms_mean, rms_peak = audio_metrics(source)
     a_score, a_reasons = audio_score(rms_mean, rms_peak)
@@ -40,7 +47,7 @@ def process(url: str, workdir: Path, ranking_path: Path, capture_seconds: int = 
     score = combine_scores(a_score, t_score, s_score, a_reasons + t_reasons)
     clip_id = hashlib.sha256(f"{url}-{datetime.now(UTC).isoformat()}".encode()).hexdigest()[:12]
     clip_path = workdir / f"{clip_id}.mp4"
-    center = max(30, duration(source) / 2)
+    center = max(30, source_duration / 2)
     make_clip(source, clip_path, center)
     thumb_path = workdir / f"{clip_id}.jpg"
     thumbnail(clip_path, thumb_path)
