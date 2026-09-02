@@ -46,8 +46,6 @@ def make_clip_range(source: Path, output: Path, start: float, end: float) -> Non
     start = max(0.0, start)
     length = max(1.0, end - start)
     output.parent.mkdir(parents=True, exist_ok=True)
-    # Keep the proven single muxed A/V timeline intact. Do not independently
-    # rewrite audio/video timestamps here: this is the sync-safe path.
     run([
         "ffmpeg", "-y", "-fflags", "+genpts+discardcorrupt", "-err_detect", "ignore_err",
         "-ss", str(start), "-i", str(source), "-t", str(length),
@@ -79,7 +77,8 @@ def burn_subtitles(source: Path, output: Path, segments: list[dict]) -> None:
         if source != output:
             run(["ffmpeg", "-y", "-i", str(source), "-map", "0", "-c", "copy", "-movflags", "+faststart", str(output)])
         return
-    ass_path = output.with_suffix(".ass")
+
+    ass_path = output.with_suffix(".ass").resolve()
     header = """[Script Info]
 ScriptType: v4.00+
 PlayResX: 1920
@@ -101,11 +100,13 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
         if text:
             events.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Default,,0,0,0,,{text}")
     ass_path.write_text(header + "\n".join(events) + "\n", encoding="utf-8")
-    # Subtitle rendering re-encodes video only. Audio is stream-copied from the
-    # already synchronized clip, preserving the validated A/V relationship.
+
+    # Pass the absolute ASS path to FFmpeg. The previous basename-only path was
+    # resolved from the runner working directory instead of the clip directory.
+    subtitle_filter = f"ass=filename='{ass_path.as_posix()}'"
     run([
         "ffmpeg", "-y", "-i", str(source),
-        "-vf", f"ass={ass_path.name}",
+        "-vf", subtitle_filter,
         "-map", "0:v:0", "-map", "0:a:0?",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
         "-profile:v", "high", "-pix_fmt", "yuv420p", "-fps_mode:v", "vfr",
