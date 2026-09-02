@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   edit:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.issue.labels.*.name, 'edit-request')
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[EDIT]') || contains(github.event.issue.labels.*.name, 'edit-request')
     runs-on: ubuntu-latest
     timeout-minutes: 330
     steps:
@@ -56,4 +56,3 @@ jobs:
       - if: github.event_name == 'issues'
         env: {GH_TOKEN: "${{ github.token }}"}
         run: gh issue comment "${{ github.event.issue.number }}" --body "Exportação concluída e anexada ao Release do corte."
-
