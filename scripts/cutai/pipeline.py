@@ -22,7 +22,12 @@ def download(url: str, output: Path, seconds: int) -> str:
                "--extractor-retries", "3", "--js-runtimes", "node",
                "--extractor-args", "youtube:player_client=default,android;formats=missing_pot",
                "--downloader", "ffmpeg", "--downloader-args", f"ffmpeg_i:-t {seconds}",
-               "-f", (\n                   "bestvideo[height<=1080][fps<=30]+bestaudio/"\n                   "best[height<=1080][fps<=30]/"\n                   "bestvideo[height<=720][fps<=30]+bestaudio/"\n                   "best[height<=720]/best"\n               ), "-o", str(output), "--print", "title"]
+               "-f", (
+                   "bestvideo[height<=1080][fps<=30]+bestaudio/"
+                   "best[height<=1080][fps<=30]/"
+                   "bestvideo[height<=720][fps<=30]+bestaudio/"
+                   "best[height<=720]/best"
+               ), "-o", str(output), "--print", "title"]
     proxy_url = normalize_proxy_url(os.getenv("CUTAI_PROXY_URL", ""))
     if proxy_url:
         command.extend(["--proxy", proxy_url])
