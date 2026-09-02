@@ -25,6 +25,15 @@ Os workflows precisam destas permissões em **Settings → Actions → General �
 
 Não é necessário cadastrar chave de API. O `GITHUB_TOKEN` temporário é fornecido pelo próprio Actions.
 
+### Proxy residencial para YouTube e TikTok
+
+Runners públicos do GitHub usam IPs de datacenter e podem receber bloqueios antirrobô. Para captura mais estável, cadastre uma URL de proxy residencial em **Settings → Secrets and variables → Actions → New repository secret**:
+
+- nome: `CUTAI_PROXY_URL`
+- valor: URL completa entregue pelo provedor, no formato `http://usuario:senha@host:porta`
+
+O segredo é injetado somente durante a captura, não aparece no repositório e é removido de mensagens de erro. Use sessão fixa (*sticky session*) durante cada captura para evitar troca de IP no meio da live. O custo é por tráfego; limite resolução e duração para controlar gastos.
+
 ## Uso
 
 ### Pela interface
@@ -46,6 +55,7 @@ Escolha um corte no Editor. A interface prepara uma Issue `edit-request`; o work
 - **IA em CPU é mais lenta e menos precisa.** O padrão é Whisper `tiny` com quantização `int8`. Modelos maiores melhoram a transcrição, mas aumentam bastante o tempo.
 - **4K é pesado.** O runner padrão não tem GPU; o encoder x264 usa CPU. A interface avisa antes da solicitação.
 - **Fontes podem bloquear downloads.** Lives privadas, DRM, login, geobloqueio e mudanças nas plataformas podem impedir o `yt-dlp`.
+- **Proxy pode ser necessário.** YouTube e TikTok bloqueiam com frequência IPs de datacenter. Proxy residencial gera cobrança por GB e também não elimina DRM ou exigências de conta.
 - **Armazenamento não é infinito.** MP4 e miniaturas ficam em Releases, nunca em commits. Ainda se aplicam políticas e cotas do GitHub.
 - **Score não garante viralização.** Ele ordena sinais observáveis e precisa ser calibrado com feedback e dados reais.
 - **Direitos autorais e privacidade.** Processe apenas transmissões que você tem autorização para baixar e reutilizar.
@@ -72,4 +82,3 @@ python -m cutai.pipeline --url 'LINK_DA_LIVE' --capture-seconds 180
 ## Evolução para produção
 
 Para escala, mova o processamento longo para workers com GPU e object storage. APIs como Whisper e um LLM podem elevar a qualidade da transcrição, dos títulos e da análise contextual. O Pages pode continuar como vitrine, mas um backend autenticado deve substituir Issues quando houver vários usuários.
-
