@@ -46,13 +46,21 @@ def scene_score(path: Path) -> float:
 def make_clip(source: Path, output: Path, center: float, length: int = 60) -> None:
     start = max(0.0, center - length / 2)
     output.parent.mkdir(parents=True, exist_ok=True)
-    run(["ffmpeg", "-y", "-fflags", "+genpts+discardcorrupt", "-err_detect", "ignore_err",
-         "-i", str(source), "-ss", str(start), "-t", str(length),
-         "-vf", "fps=30", "-af", "aresample=async=1:first_pts=0", "-fps_mode:v", "cfr",
-         "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
-         "-profile:v", "high", "-pix_fmt", "yuv420p",
-         "-c:a", "aac", "-b:a", "192k",
-         "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", str(output)])
+    # Seek before decoding so both streams start from the same source timeline.
+    # reset_timestamps via setpts/asetpts removes the independent live-stream offsets
+    # introduced when yt-dlp merges separate video/audio streams into MKV.
+    run([
+        "ffmpeg", "-y", "-fflags", "+genpts+discardcorrupt", "-err_detect", "ignore_err",
+        "-ss", str(start), "-i", str(source), "-t", str(length),
+        "-map", "0:v:0", "-map", "0:a:0?",
+        "-vf", "setpts=PTS-STARTPTS,fps=30",
+        "-af", "asetpts=PTS-STARTPTS,aresample=async=1:min_hard_comp=0.100:first_pts=0",
+        "-fps_mode:v", "cfr",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+        "-profile:v", "high", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "192k",
+        "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", "-shortest", str(output),
+    ])
 
 
 def thumbnail(source: Path, output: Path) -> None:
