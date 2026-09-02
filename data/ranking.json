@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-02T14:14:01.558339+00:00",
+  "generated_at": "2026-09-02T14:32:49.713017+00:00",
   "clips": [
     {
       "id": "9fbdb4d2af26",
@@ -631,6 +631,90 @@
       ]
     },
     {
+      "id": "022a65e469d8",
+      "title": "🔴 Rick and Morty Brasil: Clipes das Temps. 1-3 | Melhores Momentos | Ao Vivo 2026-09-02 14:26",
+      "source_url": "https://www.youtube.com/live/mz__EMYpWPw?is=xadjmdVR_FDqbedl",
+      "source_title": "🔴 Rick and Morty Brasil: Clipes das Temps. 1-3 | Melhores Momentos | Ao Vivo 2026-09-02 14:26",
+      "created_at": "2026-09-02T14:31:59.445756+00:00",
+      "duration": 64.55,
+      "score": {
+        "audio": 55.38,
+        "transcript": 63.04,
+        "scene": 100.0,
+        "total": 67.75,
+        "reasons": []
+      },
+      "score_breakdown": {
+        "audio": 55.38,
+        "transcript": 63.04,
+        "scene": 100.0
+      },
+      "transcript": "Agora vivem aqui Afagadores de bolas Plantão de notícias Uma virada na engrenagem do curioso caso desses humanoides fugitivos Não identificados Que podem estar em algum lugar do sistema engrenado Filho da... Por que os gronflamitos estavam te mantendo prisioneiro? O que tem de tão valoroso em você? Eu não tenho mais valor do que a vida em si Com tudo eu sou capaz de alterar a composição dos átomos Desse jeito Isso era oxigênio Adicionei 71 prótons a ele Ah, formidável O peido que caga a ouro Não me admira que toda a polícia do sistema esteja atrás de nós Qualquer espécie que botar as mãos nessa coisa Vai usá -lo pra dominar a galáxia Sabe como isso vai ser inconveniente pro meu trabalho? Alguém dedurou a gente Cabeça de engrenagem Sinto muito, Rick A recompensa pela sua cabeça é muito alta E como você sempre diz Você tem que ajudar o número um O número um sou eu, babaca",
+      "description": "Agora vivem aqui Afagadores de bolas Plantão de notícias Uma virada na engrenagem do curioso caso desses humanoides fugitivos Não identificados Que podem est...",
+      "hashtags": [
+        "#viral",
+        "#cortes",
+        "#voce",
+        "#engrenagem",
+        "#sistema",
+        "#isso",
+        "#cabeca"
+      ],
+      "asset_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-022a65e469d8/022a65e469d8.mp4",
+      "thumbnail_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-022a65e469d8/022a65e469d8.jpg",
+      "release_tag": "clip-022a65e469d8",
+      "reasons": [
+        "Pico de energia no áudio",
+        "Linguagem emocional: agora",
+        "Fala com ênfase",
+        "cena 100/100",
+        "duração 64.5s",
+        "legendado"
+      ]
+    },
+    {
+      "id": "2448de7cb600",
+      "title": "🔴 Rick and Morty Brasil: Clipes das Temps. 1-3 | Melhores Momentos | Ao Vivo 2026-09-02 14:26",
+      "source_url": "https://www.youtube.com/live/mz__EMYpWPw?is=xadjmdVR_FDqbedl",
+      "source_title": "🔴 Rick and Morty Brasil: Clipes das Temps. 1-3 | Melhores Momentos | Ao Vivo 2026-09-02 14:26",
+      "created_at": "2026-09-02T14:31:16.491002+00:00",
+      "duration": 60.36,
+      "score": {
+        "audio": 55.47,
+        "transcript": 62.89,
+        "scene": 100.0,
+        "total": 67.72,
+        "reasons": []
+      },
+      "score_breakdown": {
+        "audio": 55.47,
+        "transcript": 62.89,
+        "scene": 100.0
+      },
+      "transcript": "Cabeça de engrenagem Sinto muito, Rick A recompensa pela sua cabeça é muito alta E como você sempre diz Você tem que ajudar o número um O número um sou eu, babaca Era pra você ser meu amigo Amigo? Sabe o meu nome, pelo menos? É Revolho Relógio Berg Jr. Pertença a uma espécie inteira de pessoas em grenagens Me chamar de cabeça de engrenagem É como chamar um chinês de cara de ásia Ah, não! O Córnios! Duas coisas que quero deixar claras pra todos no recinto Nunca me traiam e tá na hora de ir! Gary Sonolento Ah, a minha cabeça tá cheia de memórias da nossa amizade Eu tô convencido de que você é marido da Beth Mas se essas memórias não podem ser confiáveis, então... Jerry, apenas diga Gary Sonolento Como sabemos se eu sou real? Puxa, Jerry! Não, você é real E olha pra mim Não tô entendendo nada daquela loucura Mas com isso, a gente E você é real, Jerry Lembra",
+      "description": "Cabeça de engrenagem Sinto muito, Rick A recompensa pela sua cabeça é muito alta E como você sempre diz Você tem que ajudar o número um O número um sou eu, b...",
+      "hashtags": [
+        "#viral",
+        "#cortes",
+        "#voce",
+        "#cabeca",
+        "#jerry",
+        "#real",
+        "#engrenagem"
+      ],
+      "asset_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-2448de7cb600/2448de7cb600.mp4",
+      "thumbnail_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-2448de7cb600/2448de7cb600.jpg",
+      "release_tag": "clip-2448de7cb600",
+      "reasons": [
+        "Pico de energia no áudio",
+        "Linguagem emocional: olha",
+        "Fala com ênfase",
+        "cena 100/100",
+        "duração 60.4s",
+        "legendado"
+      ]
+    },
+    {
       "id": "ee9cced3f787",
       "title": "Vou preparar uma massa.",
       "source_url": "https://www.youtube.com/live/KwIltUX1mZ4?feature=shared",
@@ -900,6 +984,47 @@
       "reasons": [
         "Pico de energia no áudio",
         "Fala com ênfase"
+      ]
+    },
+    {
+      "id": "66f785895387",
+      "title": "🔴 Rick and Morty Brasil: Clipes das Temps. 1-3 | Melhores Momentos | Ao Vivo 2026-09-02 14:26",
+      "source_url": "https://www.youtube.com/live/mz__EMYpWPw?is=xadjmdVR_FDqbedl",
+      "source_title": "🔴 Rick and Morty Brasil: Clipes das Temps. 1-3 | Melhores Momentos | Ao Vivo 2026-09-02 14:26",
+      "created_at": "2026-09-02T14:32:49.712360+00:00",
+      "duration": 60.9,
+      "score": {
+        "audio": 58.81,
+        "transcript": 40.5,
+        "scene": 100.0,
+        "total": 58.81,
+        "reasons": []
+      },
+      "score_breakdown": {
+        "audio": 58.81,
+        "transcript": 40.5,
+        "scene": 100.0
+      },
+      "transcript": "O céu passiva e goa Os lunáticos querem as coisas do jeito deles Mas vamos fazer uns versão Déticos Digadelnáticos Calca com essa merda de lunáticos Isso não é um show musical, é uma droga de uma operação Temos que ficar tranquilos e discretos Enviado Patu, patu, pássaro É muito engraçado isso Aqui vai outra engraçada Esse lugar é ótimo Ásida a vontade de ficar mais um dia aqui Vai ter que ficar O que quer dizer com isso? Esses são os Jerry's que os Rickies e Mores nunca voltaram pra buscar",
+      "description": "O céu passiva e goa Os lunáticos querem as coisas do jeito deles Mas vamos fazer uns versão Déticos Digadelnáticos Calca com essa merda de lunáticos Isso não...",
+      "hashtags": [
+        "#viral",
+        "#cortes",
+        "#isso",
+        "#ficar",
+        "#lunaticos",
+        "#patu",
+        "#aqui"
+      ],
+      "asset_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-66f785895387/66f785895387.mp4",
+      "thumbnail_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-66f785895387/66f785895387.jpg",
+      "release_tag": "clip-66f785895387",
+      "reasons": [
+        "Pico de energia no áudio",
+        "Fala com ênfase",
+        "cena 100/100",
+        "duração 60.9s",
+        "legendado"
       ]
     },
     {
