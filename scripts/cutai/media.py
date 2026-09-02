@@ -13,7 +13,6 @@ def duration(path: Path) -> float:
 
 
 def audio_metrics(path: Path) -> tuple[float, float]:
-    # FFmpeg volumedetect avoids loading the complete media file in Python.
     result = subprocess.run(
         ["ffmpeg", "-hide_banner", "-i", str(path), "-af", "volumedetect", "-f", "null", "-"],
         text=True, capture_output=True, check=False,
@@ -43,12 +42,10 @@ def scene_score(path: Path) -> float:
     return min(100.0, 20 + changes * 5.0)
 
 
-def make_clip(source: Path, output: Path, center: float, length: int = 60) -> None:
-    start = max(0.0, center - length / 2)
+def make_clip_range(source: Path, output: Path, start: float, end: float) -> None:
+    start = max(0.0, start)
+    length = max(1.0, end - start)
     output.parent.mkdir(parents=True, exist_ok=True)
-    # Seek before decoding so both streams start from the same source timeline.
-    # reset_timestamps via setpts/asetpts removes the independent live-stream offsets
-    # introduced when yt-dlp merges separate video/audio streams into MKV.
     run([
         "ffmpeg", "-y", "-fflags", "+genpts+discardcorrupt", "-err_detect", "ignore_err",
         "-ss", str(start), "-i", str(source), "-t", str(length),
@@ -61,6 +58,11 @@ def make_clip(source: Path, output: Path, center: float, length: int = 60) -> No
         "-c:a", "aac", "-b:a", "192k",
         "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", "-shortest", str(output),
     ])
+
+
+def make_clip(source: Path, output: Path, center: float, length: int = 60) -> None:
+    start = max(0.0, center - length / 2)
+    make_clip_range(source, output, start, start + length)
 
 
 def thumbnail(source: Path, output: Path) -> None:
