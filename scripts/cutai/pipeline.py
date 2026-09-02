@@ -22,24 +22,54 @@ RANKING_PATH = Path("data/ranking.json")
 
 def download(url: str, output: Path, seconds: int) -> str:
     output.parent.mkdir(parents=True, exist_ok=True)
-    command = ["yt-dlp", "--no-playlist", "--no-progress", "--no-simulate", "--impersonate", "chrome",
-               "--extractor-retries", "3", "--js-runtimes", "node",
-               "--extractor-args", "youtube:player_client=default,android;formats=missing_pot",
-               "--downloader", "ffmpeg", "--downloader-args", f"ffmpeg_i:-t {seconds}",
-               "--merge-output-format", "mkv",
-               "-f", "best[height<=1080][fps<=30]/best[height<=720][fps<=30]/best",
-               "-o", str(output), "--print", "title"]
+
+    base = [
+        "yt-dlp", "--no-playlist", "--no-progress", "--no-simulate",
+        "--impersonate", "chrome", "--extractor-retries", "5", "--fragment-retries", "5",
+        "--retry-sleep", "extractor:2", "--js-runtimes", "node",
+        "--downloader", "ffmpeg", "--downloader-args", f"ffmpeg_i:-t {seconds}",
+        "--merge-output-format", "mkv",
+        "-f", "best[height<=1080][fps<=30]/best[height<=720][fps<=30]/best",
+        "-o", str(output), "--print", "title",
+    ]
+
     proxy_url = normalize_proxy_url(os.getenv("CUTAI_PROXY_URL", ""))
-    if proxy_url:
-        command.extend(["--proxy", proxy_url])
-    command.append(url)
-    result = subprocess.run(command, text=True, capture_output=True)
-    if result.returncode:
-        detail = result.stderr.strip()[-3000:] or result.stdout.strip()[-3000:]
+    cookie_file = os.getenv("CUTAI_YOUTUBE_COOKIES_FILE", "").strip()
+    user_agent = os.getenv("CUTAI_YOUTUBE_USER_AGENT", "").strip()
+
+    # Tenta clientes diferentes do YouTube antes de desistir. Alguns IPs de datacenter
+    # recebem o desafio anti-bot apenas em determinados player clients.
+    attempts = [
+        "youtube:player_client=tv,web_safari;formats=missing_pot",
+        "youtube:player_client=web_safari,android;formats=missing_pot",
+        "youtube:player_client=default,android;formats=missing_pot",
+    ]
+
+    errors: list[str] = []
+    for extractor_args in attempts:
+        command = base + ["--extractor-args", extractor_args]
+        if cookie_file and Path(cookie_file).exists():
+            command += ["--cookies", cookie_file]
+        if user_agent:
+            command += ["--user-agent", user_agent]
+        if proxy_url:
+            command += ["--proxy", proxy_url]
+        command.append(url)
+
+        result = subprocess.run(command, text=True, capture_output=True)
+        if result.returncode == 0:
+            return result.stdout.strip().splitlines()[-1] if result.stdout.strip() else "Live"
+
+        detail = result.stderr.strip()[-1600:] or result.stdout.strip()[-1600:]
         if proxy_url:
             detail = detail.replace(proxy_url, "[proxy protegido]")
-        raise RuntimeError(f"yt-dlp não conseguiu acessar esta transmissão:\n{detail}")
-    return result.stdout.strip().splitlines()[-1] if result.stdout.strip() else "Live"
+        errors.append(detail)
+        output.unlink(missing_ok=True)
+
+    raise RuntimeError(
+        "yt-dlp não conseguiu acessar esta transmissão após tentar múltiplos clientes do YouTube:\n"
+        + "\n--- tentativa seguinte ---\n".join(errors)
+    )
 
 
 def _segment_excitement(text: str) -> float:
@@ -118,10 +148,10 @@ def process(url: str, workdir: Path, capture_seconds: int = 180) -> list[Clip]:
         raise RuntimeError(f"A plataforma entregou somente {source_duration:.1f}s utilizáveis. São necessários pelo menos 60s para publicar um corte.")
     _full_transcript, segments = transcribe(source)
     centers = choose_top_centers(segments, source_duration, clip_length=60, limit=3)
-    clips: list[Clip] = []
-    for rank, (window_score, center) in enumerate(centers, start=1):
+    clips = []
+    for rank, (_, center) in enumerate(centers, start=1):
         start, end = choose_smart_range(segments, center, source_duration)
-        clip_id = hashlib.sha1(f"{url}-{datetime.now(UTC).isoformat()}-{rank}-{start:.3f}-{end:.3f}".encode()).hexdigest()[:12]
+        clip_id = hashlib.sha1(f"{url}:{datetime.now(UTC).isoformat()}:{rank}".encode()).hexdigest()[:12]
         raw_clip_path = workdir / f"{clip_id}.raw.mp4"
         clip_path = workdir / f"{clip_id}.mp4"
         thumb_path = workdir / f"{clip_id}.jpg"
@@ -131,49 +161,33 @@ def process(url: str, workdir: Path, capture_seconds: int = 180) -> list[Clip]:
             seg_start = float(segment.get("start", 0))
             seg_end = float(segment.get("end", 0))
             if seg_end > start and seg_start < end:
-                local_segments.append({**segment, "start": max(0.0, seg_start - start), "end": min(end - start, seg_end - start)})
+                local_segments.append({"start": max(0.0, seg_start - start), "end": min(end - start, seg_end - start), "text": str(segment.get("text", ""))})
         burn_subtitles(raw_clip_path, clip_path, local_segments)
         raw_clip_path.unlink(missing_ok=True)
         thumbnail(clip_path, thumb_path)
-        transcript = " ".join(str(s.get("text", "")).strip() for s in local_segments).strip()
-        mean_amp, peak_amp = audio_metrics(clip_path)
-        a_score, a_reasons = audio_score(mean_amp, peak_amp)
+        transcript = " ".join(s["text"] for s in local_segments).strip()
+        mean, peak = audio_metrics(clip_path)
+        a_score, a_reasons = audio_score(mean, peak)
         t_score, t_reasons = transcript_score(transcript)
-        v_score = scene_score(clip_path)
-        score_data = combine_scores(a_score, t_score, v_score, a_reasons + t_reasons)
+        s_score = scene_score(clip_path)
+        score = combine_scores(a_score, t_score, s_score)
         description, hashtags = suggest_metadata(transcript)
-        clip_title = description[:80] if description else source_title[:80]
-        reasons = list(score_data.reasons)
-        reasons.append(f"Top {rank}; janela inteligente {start:.1f}s–{end:.1f}s ({end-start:.1f}s); núcleo {window_score:.1f}; legendado")
-        clip = Clip(
-            id=clip_id,
-            title=clip_title,
-            source_url=url,
-            source_title=source_title,
-            created_at=datetime.now(UTC).isoformat(),
-            duration=end-start,
-            score=score_data.total,
-            score_breakdown={"audio": a_score, "transcript": t_score, "scene": v_score, "window": round(window_score, 2)},
-            transcript=transcript,
-            description=description,
-            hashtags=hashtags,
-            reasons=reasons,
-        )
-        clips.append(clip)
+        reasons = a_reasons + t_reasons + [f"cena {s_score:.0f}/100", f"duração {end-start:.1f}s", "legendado"]
+        clip = Clip(id=clip_id, title=source_title, score=score, duration=round(end-start, 2), source_url=url, asset_url="", thumbnail_url="", transcript=transcript, reasons=reasons, description=description, hashtags=hashtags, created_at=datetime.now(UTC).isoformat())
         upsert_clip(RANKING_PATH, clip)
-    return clips
+        clips.append(clip)
+    clips.sort(key=lambda c: c.score, reverse=True)
+    return clips[:3]
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", required=True)
-    parser.add_argument("--workdir", type=Path, default=Path("work"))
     parser.add_argument("--capture-seconds", type=int, default=180)
+    parser.add_argument("--workdir", default="work")
     args = parser.parse_args()
-    clips = process(args.url, args.workdir, args.capture_seconds)
-    result = {"clips": [clip.to_dict() for clip in clips], "count": len(clips), "best_id": clips[0].id if clips else None}
-    (args.workdir / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps(result, ensure_ascii=False))
+    clips = process(args.url, Path(args.workdir), args.capture_seconds)
+    Path(args.workdir, "result.json").write_text(json.dumps({"clips": [clip.to_dict() for clip in clips]}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":
