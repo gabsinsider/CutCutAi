@@ -80,114 +80,137 @@ CONTINUATION_ENDINGS = {
 }
 
 
-def _window_context_score(inside: list[dict], start: float, end: float) -> float:
-    text = " ".join(str(s.get("text", "")) for s in inside).strip()
-    normalized = text.lower()
-    words = re.findall(r"[\wÀ-ÿ]+", normalized)
-    if not words:
-        return 0.0
-    speech_seconds = sum(max(0.0, min(end, float(s.get("end", 0))) - max(start, float(s.get("start", 0)))) for s in inside)
-    speech_ratio = speech_seconds / max(1.0, end - start)
-    reaction_hits = sum(1 for phrase in REACTION_PHRASES if phrase in normalized)
-    story_hits = sum(1 for term in STORY_TERMS if term in words)
-    questions = text.count("?")
-    emphasis = text.count("!")
-    score = min(28.0, speech_ratio * 35.0)
-    score += min(22.0, len(words) * 0.11)
-    score += min(24.0, reaction_hits * 6.0 + emphasis * 2.0)
-    score += min(18.0, story_hits * 2.5 + questions * 2.0)
-    midpoint = (start + end) / 2
-    central = [s for s in inside if abs(((float(s.get("start", 0)) + float(s.get("end", 0))) / 2) - midpoint) <= 18]
-    central_text = " ".join(str(s.get("text", "")).lower() for s in central)
-    if any(phrase in central_text for phrase in REACTION_PHRASES):
-        score += 8.0
-    return min(100.0, score)
-
-
-def choose_top_centers(segments: list[dict], source_duration: float, clip_length: int = 60, limit: int = 3) -> list[tuple[float, float]]:
-    if source_duration <= clip_length:
-        return [(50.0, source_duration / 2)]
-    half = clip_length / 2
-    candidates: list[tuple[float, float]] = []
-    center = half
-    last = max(half, source_duration - half)
-    while center <= last + 0.01:
-        start, end = center - half, center + half
-        inside = [s for s in segments if float(s.get("end", 0)) > start and float(s.get("start", 0)) < end]
-        candidates.append((_window_context_score(inside, start, end), center))
-        center += 5.0
-    candidates.sort(reverse=True)
-    selected: list[tuple[float, float]] = []
-    for candidate in candidates:
-        if all(abs(candidate[1] - chosen[1]) >= clip_length * 0.85 for chosen in selected):
-            selected.append(candidate)
-            if len(selected) == limit:
-                break
-    if len(selected) < limit:
-        for candidate in candidates:
-            if candidate not in selected and all(abs(candidate[1] - chosen[1]) >= clip_length * 0.55 for chosen in selected):
-                selected.append(candidate)
-                if len(selected) == limit:
-                    break
-    return selected or [(0.0, source_duration / 2)]
-
-
 def _looks_complete(text: str) -> bool:
     text = text.strip()
     if not text:
         return False
     last_word = re.findall(r"[\wÀ-ÿ]+", text.lower())
-    if not last_word:
-        return False
-    if last_word[-1] in CONTINUATION_ENDINGS:
+    if not last_word or last_word[-1] in CONTINUATION_ENDINGS:
         return False
     return text.endswith((".", "!", "?"))
 
 
-def choose_smart_range(segments: list[dict], center: float, source_duration: float) -> tuple[float, float]:
-    core_start = max(0.0, center - MIN_CLIP_SECONDS / 2)
-    core_end = min(source_duration, core_start + MIN_CLIP_SECONDS)
-    core_start = max(0.0, core_end - MIN_CLIP_SECONDS)
+def _topic_blocks(segments: list[dict], source_duration: float) -> list[dict]:
+    """Agrupa legendas curtas em unidades de conversa antes de escolher cortes."""
     if not segments:
-        return core_start, core_end
+        return []
+    blocks: list[dict] = []
+    current: list[dict] = []
+    for segment in segments:
+        if current:
+            gap = float(segment.get("start", 0)) - float(current[-1].get("end", 0))
+            elapsed = float(current[-1].get("end", 0)) - float(current[0].get("start", 0))
+            # Pausa longa ou bloco já substancial indica mudança provável de assunto.
+            if gap >= 1.6 or (elapsed >= 35.0 and gap >= 0.75):
+                blocks.append(_make_block(current))
+                current = []
+        current.append(segment)
+    if current:
+        blocks.append(_make_block(current))
 
-    start = core_start
-    before = [s for s in segments if float(s.get("start", 0)) <= core_start and core_start - float(s.get("start", 0)) <= 15.0]
-    if before:
-        start = float(before[-1].get("start", core_start))
+    # Blocos minúsculos isolados não têm contexto suficiente: una ao vizinho.
+    merged: list[dict] = []
+    for block in blocks:
+        if merged and block["end"] - block["start"] < 12.0 and block["start"] - merged[-1]["end"] < 3.0:
+            merged[-1]["end"] = block["end"]
+            merged[-1]["segments"].extend(block["segments"])
+            merged[-1]["text"] += " " + block["text"]
+        else:
+            merged.append(block)
+    return merged
 
-    # Nunca encerre apenas porque atingiu 60/90s. Continue até encontrar uma
-    # conclusão natural: pontuação terminal seguida de uma pequena pausa.
-    end = core_end
-    future = [s for s in segments if float(s.get("end", 0)) >= core_end]
-    for index, segment in enumerate(future):
-        candidate_end = float(segment.get("end", end))
-        if candidate_end - start > MAX_CLIP_SECONDS:
+
+def _make_block(items: list[dict]) -> dict:
+    return {
+        "start": float(items[0].get("start", 0)),
+        "end": float(items[-1].get("end", 0)),
+        "segments": list(items),
+        "text": " ".join(str(s.get("text", "")) for s in items).strip(),
+    }
+
+
+def _block_score(block: dict) -> float:
+    text = block["text"]
+    normalized = text.lower()
+    words = re.findall(r"[\wÀ-ÿ]+", normalized)
+    duration_s = max(1.0, block["end"] - block["start"])
+    reaction_hits = sum(1 for phrase in REACTION_PHRASES if phrase in normalized)
+    story_hits = sum(1 for term in STORY_TERMS if term in words)
+    score = min(30.0, len(words) * 0.13)
+    score += min(25.0, reaction_hits * 7.0 + text.count("!") * 2.0)
+    score += min(25.0, story_hits * 2.8 + text.count("?") * 2.5)
+    score += min(15.0, duration_s * 0.25)
+    if _looks_complete(text):
+        score += 5.0
+    return min(100.0, score)
+
+
+def _context_range(blocks: list[dict], index: int, source_duration: float) -> tuple[float, float]:
+    """Inclui preparação + assunto principal + desfecho, sem começar no meio da ideia."""
+    main = blocks[index]
+    start = main["start"]
+    end = main["end"]
+
+    # Inclua o bloco anterior quando o assunto principal sozinho começa curto demais.
+    if index > 0 and (end - start < 45.0 or start - blocks[index - 1]["end"] < 1.0):
+        previous = blocks[index - 1]
+        if end - previous["start"] <= MAX_CLIP_SECONDS:
+            start = previous["start"]
+
+    # Continue pelos blocos seguintes até haver pelo menos 60 s e uma conclusão.
+    cursor = index + 1
+    while cursor < len(blocks) and end - start < MIN_CLIP_SECONDS:
+        nxt = blocks[cursor]
+        if nxt["end"] - start > MAX_CLIP_SECONDS:
             break
-        text = str(segment.get("text", "")).strip()
-        next_start = float(future[index + 1].get("start", candidate_end)) if index + 1 < len(future) else source_duration
-        pause = max(0.0, next_start - candidate_end)
-        end = candidate_end
-        if _looks_complete(text) and pause >= 0.35:
+        end = nxt["end"]
+        cursor += 1
+
+    # Mesmo após 60 s, não pare se o bloco final aparenta continuação imediata.
+    while cursor < len(blocks) and end - start < MAX_CLIP_SECONDS:
+        current_text = blocks[cursor - 1]["text"] if cursor > 0 else main["text"]
+        gap = blocks[cursor]["start"] - end
+        if _looks_complete(current_text) and gap >= 0.75:
             break
+        nxt = blocks[cursor]
+        if nxt["end"] - start > MAX_CLIP_SECONDS:
+            break
+        end = nxt["end"]
+        cursor += 1
 
     if end - start < MIN_CLIP_SECONDS:
-        end = min(source_duration, start + MIN_CLIP_SECONDS)
-    if end - start > MAX_CLIP_SECONDS:
-        end = min(source_duration, start + MAX_CLIP_SECONDS)
+        pad = MIN_CLIP_SECONDS - (end - start)
+        start = max(0.0, start - min(pad, 12.0))
+        end = min(source_duration, max(end, start + MIN_CLIP_SECONDS))
+    return max(0.0, start), min(source_duration, min(end, start + MAX_CLIP_SECONDS))
 
-    # Se o limite máximo cair dentro de uma fala, recue para a última conclusão
-    # detectável em vez de cortar uma frase pela metade.
-    if end < source_duration:
-        eligible = [s for s in segments if start + MIN_CLIP_SECONDS <= float(s.get("end", 0)) <= end]
-        completed = [s for s in eligible if _looks_complete(str(s.get("text", "")))]
-        if completed:
-            last = completed[-1]
-            last_end = float(last.get("end", end))
-            if end - last_end <= 8.0:
-                end = last_end
 
-    return max(0.0, start), min(source_duration, end)
+def choose_top_ranges(segments: list[dict], source_duration: float, limit: int = 3) -> list[tuple[float, float, float]]:
+    blocks = _topic_blocks(segments, source_duration)
+    if not blocks:
+        return [(50.0, 0.0, min(source_duration, max(MIN_CLIP_SECONDS, source_duration)))]
+    candidates = []
+    for index, block in enumerate(blocks):
+        start, end = _context_range(blocks, index, source_duration)
+        score = _block_score(block)
+        candidates.append((score, start, end))
+    candidates.sort(key=lambda item: item[0], reverse=True)
+
+    selected: list[tuple[float, float, float]] = []
+    for candidate in candidates:
+        _, start, end = candidate
+        overlap = False
+        for _, chosen_start, chosen_end in selected:
+            intersection = max(0.0, min(end, chosen_end) - max(start, chosen_start))
+            smaller = max(1.0, min(end - start, chosen_end - chosen_start))
+            if intersection / smaller > 0.25:
+                overlap = True
+                break
+        if not overlap:
+            selected.append(candidate)
+            if len(selected) == limit:
+                break
+    return selected or [candidates[0]]
 
 
 def process(url: str, workdir: Path, capture_seconds: int = 180) -> list[Clip]:
@@ -199,10 +222,9 @@ def process(url: str, workdir: Path, capture_seconds: int = 180) -> list[Clip]:
     if source_duration < MIN_CLIP_SECONDS:
         raise RuntimeError(f"A plataforma entregou somente {source_duration:.1f}s utilizáveis. São necessários pelo menos 60s para publicar um corte.")
     _full_transcript, segments = transcribe(source)
-    centers = choose_top_centers(segments, source_duration, clip_length=60, limit=3)
+    ranges = choose_top_ranges(segments, source_duration, limit=3)
     clips = []
-    for rank, (context_score, center) in enumerate(centers, start=1):
-        start, end = choose_smart_range(segments, center, source_duration)
+    for rank, (context_score, start, end) in enumerate(ranges, start=1):
         clip_id = hashlib.sha1(f"{url}:{datetime.now(UTC).isoformat()}:{rank}".encode()).hexdigest()[:12]
         raw_clip_path = workdir / f"{clip_id}.raw.mp4"
         clip_path = workdir / f"{clip_id}.mp4"
@@ -223,10 +245,9 @@ def process(url: str, workdir: Path, capture_seconds: int = 180) -> list[Clip]:
         t_score, t_reasons = transcript_score(transcript)
         s_score = scene_score(clip_path)
         base_score = combine_scores(a_score, t_score, s_score)
-        contextual_total = min(100.0, base_score.total * 0.70 + context_score * 0.30)
-        base_score.total = round(contextual_total, 2)
+        base_score.total = round(min(100.0, base_score.total * 0.65 + context_score * 0.35), 2)
         description, hashtags = suggest_metadata(transcript)
-        reasons = a_reasons + t_reasons + [f"contexto {context_score:.0f}/100", f"cena {s_score:.0f}/100", f"duração {end-start:.1f}s", "final natural", "legendado"]
+        reasons = a_reasons + t_reasons + [f"contexto {context_score:.0f}/100", f"cena {s_score:.0f}/100", f"duração {end-start:.1f}s", "bloco completo de assunto", "legendado"]
         score_breakdown = {"audio": round(a_score, 2), "transcript": round(t_score, 2), "scene": round(s_score, 2), "context": round(context_score, 2)}
         clip = Clip(id=clip_id, title=source_title, source_title=source_title, score=base_score, score_breakdown=score_breakdown, duration=round(end-start, 2), source_url=url, asset_url="", thumbnail_url="", transcript=transcript, reasons=reasons, description=description, hashtags=hashtags, created_at=datetime.now(UTC).isoformat())
         upsert_clip(RANKING_PATH, clip)
