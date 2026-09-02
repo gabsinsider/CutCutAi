@@ -175,7 +175,7 @@ def process(url: str, workdir: Path, capture_seconds: int = 180) -> list[Clip]:
         clip = Clip(id=clip_id, title=source_title, source_title=source_title, score=score, score_breakdown=score_breakdown, duration=round(end-start, 2), source_url=url, asset_url="", thumbnail_url="", transcript=transcript, reasons=reasons, description=description, hashtags=hashtags, created_at=datetime.now(UTC).isoformat())
         upsert_clip(RANKING_PATH, clip)
         clips.append(clip)
-    clips.sort(key=lambda c: c.score, reverse=True)
+    clips.sort(key=lambda c: c.score.total, reverse=True)
     return clips[:3]
 
 
