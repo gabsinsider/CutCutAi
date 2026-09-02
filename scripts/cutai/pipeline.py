@@ -89,40 +89,37 @@ def _block_score(block: dict) -> float:
     reaction_hits = sum(1 for p in REACTION_PHRASES if p in normalized); story_hits = sum(1 for t in STORY_TERMS if t in words)
     return min(100.0, min(30.0, len(words)*0.13) + min(25.0, reaction_hits*7 + text.count("!")*2) + min(25.0, story_hits*2.8) + min(15.0, duration_s*0.25) + (5 if _looks_complete(text) else 0))
 
+def _natural_boundary(current: dict, nxt: dict) -> bool:
+    if not _looks_complete(current["text"]): return False
+    gap = nxt["start"] - current["end"]
+    cohesion = _similarity(current["text"], nxt["text"])
+    reset = bool(set(_words(nxt["text"])[:5]) & RESET_TERMS)
+    return cohesion < .14 and (reset or gap >= 1.0)
+
 def _context_range(blocks: list[dict], index: int, source_duration: float) -> tuple[float, float]:
     main = blocks[index]; start = main["start"]; end = main["end"]
-    # Não começar com frase que claramente depende do que veio antes.
     if index > 0 and (_starts_as_continuation(main["text"]) or main["start"] < 12.0):
         previous = blocks[index-1]
         if end-previous["start"] <= MAX_CLIP_SECONDS: start = previous["start"]
     cursor = index + 1
     while cursor < len(blocks):
-        elapsed = end-start
-        current = blocks[cursor-1]
-        nxt = blocks[cursor]
-        gap = nxt["start"]-end
-        cohesion = _similarity(current["text"], nxt["text"])
-        next_reset = bool(set(_words(nxt["text"])[:5]) & RESET_TERMS)
-        # Só termina quando há evidência de que o assunto realmente acabou:
-        # conclusão explícita OU começo claro de um novo tópico com baixa coesão.
-        concluded = _explicit_conclusion(current["text"])
-        topic_changed = elapsed >= MIN_CLIP_SECONDS and next_reset and cohesion < .16 and gap >= .45
-        if elapsed >= MIN_CLIP_SECONDS and (concluded or topic_changed): break
+        elapsed = end-start; current = blocks[cursor-1]; nxt = blocks[cursor]
+        if elapsed >= MIN_CLIP_SECONDS and (_explicit_conclusion(current["text"]) or _natural_boundary(current, nxt)): break
         if nxt["end"]-start > MAX_CLIP_SECONDS: return start, end
         end = nxt["end"]; cursor += 1
     return max(0.0,start), min(source_duration,min(end,start+MAX_CLIP_SECONDS))
 
 def _range_has_ending(blocks: list[dict], start: float, end: float, source_duration: float) -> bool:
-    if end-start < MIN_CLIP_SECONDS or source_duration-end < 35.0: return False
+    if end-start < MIN_CLIP_SECONDS: return False
     included = [b for b in blocks if b["end"] > start and b["start"] < end]
     if not included: return False
     last = included[-1]
     if _explicit_conclusion(last["text"]): return True
     following = next((b for b in blocks if b["start"] >= end-.1), None)
-    if not following: return False
-    cohesion = _similarity(last["text"], following["text"])
-    reset = bool(set(_words(following["text"])[:5]) & RESET_TERMS)
-    return _looks_complete(last["text"]) and reset and cohesion < .16 and following["start"]-end >= .45
+    if following and _natural_boundary(last, following): return True
+    # O fim da janela também pode ser natural quando a última fala fecha uma frase
+    # e há margem suficiente para não estarmos simplesmente cortando a captura.
+    return _looks_complete(last["text"]) and source_duration-end >= 20.0 and not _starts_as_continuation(last["text"])
 
 def _story_quality(blocks: list[dict], index: int, start: float, end: float, source_duration: float) -> float:
     main=blocks[index]; quality=_block_score(main); first=_words(main["text"])[:8]
@@ -131,7 +128,7 @@ def _story_quality(blocks: list[dict], index: int, start: float, end: float, sou
     if _range_has_ending(blocks,start,end,source_duration): quality += 30
     else: quality -= 60
     if end-start >= MIN_CLIP_SECONDS: quality += 5
-    if source_duration-end < 45.0: quality -= 30
+    if source_duration-end < 30.0: quality -= 20
     if start < 10.0: quality -= 20
     return max(0.0,min(100.0,quality))
 
@@ -156,7 +153,7 @@ def process(url: str, workdir: Path, capture_seconds: int=DEFAULT_CAPTURE_SECOND
     source_title=download(url,source,max(60,min(capture_seconds,900))); source_duration=duration(source)
     if source_duration<MIN_CLIP_SECONDS: raise RuntimeError(f"A plataforma entregou somente {source_duration:.1f}s utilizáveis. São necessários pelo menos 60s para publicar um corte.")
     _,segments=transcribe(source); ranges=choose_top_ranges(segments,source_duration,3); clips=[]
-    if not ranges: raise RuntimeError("Nenhuma história autocontida com conclusão semântica foi encontrada. O sistema recusou cortar um assunto antes do desfecho.")
+    if not ranges: raise RuntimeError("Nenhuma história autocontida com final natural foi encontrada. O sistema recusou cortar um assunto claramente em andamento.")
     for rank,(context_score,start,end) in enumerate(ranges,1):
         clip_id=hashlib.sha1(f"{url}:{datetime.now(UTC).isoformat()}:{rank}".encode()).hexdigest()[:12]; raw=workdir/f"{clip_id}.raw.mp4"; clip_path=workdir/f"{clip_id}.mp4"; thumb=workdir/f"{clip_id}.jpg"
         make_clip_range(source,raw,start,end); local=[]
@@ -164,7 +161,7 @@ def process(url: str, workdir: Path, capture_seconds: int=DEFAULT_CAPTURE_SECOND
             ss=float(s.get("start",0)); se=float(s.get("end",0))
             if se>start and ss<end: local.append({"start":max(0.0,ss-start),"end":min(end-start,se-start),"text":str(s.get("text",""))})
         burn_subtitles(raw,clip_path,local); raw.unlink(missing_ok=True); thumbnail(clip_path,thumb); transcript=" ".join(s["text"] for s in local).strip(); mean,peak=audio_metrics(clip_path); a_score,a_reasons=audio_score(mean,peak); t_score,t_reasons=transcript_score(transcript); s_score=scene_score(clip_path); base=combine_scores(a_score,t_score,s_score); base.total=round(min(100.0,base.total*.60+context_score*.40),2); description,hashtags=suggest_metadata(transcript)
-        reasons=a_reasons+t_reasons+[f"história {context_score:.0f}/100",f"cena {s_score:.0f}/100",f"duração {end-start:.1f}s","conclusão semântica confirmada","legendado"]; breakdown={"audio":round(a_score,2),"transcript":round(t_score,2),"scene":round(s_score,2),"context":round(context_score,2)}
+        reasons=a_reasons+t_reasons+[f"história {context_score:.0f}/100",f"cena {s_score:.0f}/100",f"duração {end-start:.1f}s","final natural confirmado","legendado"]; breakdown={"audio":round(a_score,2),"transcript":round(t_score,2),"scene":round(s_score,2),"context":round(context_score,2)}
         clip=Clip(id=clip_id,title=source_title,source_title=source_title,score=base,score_breakdown=breakdown,duration=round(end-start,2),source_url=url,asset_url="",thumbnail_url="",transcript=transcript,reasons=reasons,description=description,hashtags=hashtags,created_at=datetime.now(UTC).isoformat()); upsert_clip(RANKING_PATH,clip); clips.append(clip)
     clips.sort(key=lambda c:c.score.total,reverse=True); return clips[:3]
 
