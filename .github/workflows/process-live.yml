@@ -13,7 +13,7 @@ name: Processar live
       capture_seconds:
         description: Segundos nesta captura (60–900)
         required: false
-        default: "180"
+        default: "300"
         type: string
 
 concurrency:
@@ -68,8 +68,8 @@ jobs:
           DEFAULT_LIVE_URL: "https://www.youtube.com/live/mz__EMYpWPw?is=xadjmdVR_FDqbedl"
         run: |
           URL="${INPUT_URL:-${ISSUE_URL:-$DEFAULT_LIVE_URL}}"
-          SECONDS="${INPUT_SECONDS:-180}"
-          if ! [[ "$SECONDS" =~ ^[0-9]+$ ]] || (( SECONDS < 60 || SECONDS > 900 )); then SECONDS=180; fi
+          SECONDS="${INPUT_SECONDS:-300}"
+          if ! [[ "$SECONDS" =~ ^[0-9]+$ ]] || (( SECONDS < 60 || SECONDS > 900 )); then SECONDS=300; fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "seconds=$SECONDS" >> "$GITHUB_OUTPUT"
       - name: Capturar, analisar e criar Top 3
