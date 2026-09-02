@@ -25,7 +25,7 @@ permissions:
 
 jobs:
   process:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.issue.labels.*.name, 'live-request')
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[LIVE]') || contains(github.event.issue.labels.*.name, 'live-request')
     runs-on: ubuntu-latest
     timeout-minutes: 330
     steps:
@@ -88,4 +88,3 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh issue comment "${{ github.event.issue.number }}" --body "Corte **${{ steps.result.outputs.clip_id }}** concluído com score **${{ steps.result.outputs.score }}**. O ranking será atualizado no site."
-
