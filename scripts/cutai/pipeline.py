@@ -17,7 +17,7 @@ from .validation import validate_source_url
 
 def download(url: str, output: Path, seconds: int) -> str:
     output.parent.mkdir(parents=True, exist_ok=True)
-    command = ["yt-dlp", "--no-playlist", "--no-progress", "--impersonate", "chrome",
+    command = ["yt-dlp", "--no-playlist", "--no-progress", "--no-simulate", "--impersonate", "chrome",
                "--extractor-retries", "3", "--merge-output-format", "mp4",
                "--downloader", "ffmpeg", "--downloader-args", f"ffmpeg_i:-t {seconds}",
                "-f", "best[height<=1080]/best", "-o", str(output), "--print", "title", url]
