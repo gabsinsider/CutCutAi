@@ -17,6 +17,8 @@ jobs:
   continuous-live:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -28,13 +30,12 @@ jobs:
           python -m pip install -U pip
           pip install -r requirements.txt
       - name: Preparar cookies
-        if: ${{ secrets.YOUTUBE_COOKIES != '' }}
-        env:
-          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
         run: |
-          printf '%s' "$YOUTUBE_COOKIES" > "$RUNNER_TEMP/youtube-cookies.txt"
-          chmod 600 "$RUNNER_TEMP/youtube-cookies.txt"
-          echo "CUTAI_YOUTUBE_COOKIES_FILE=$RUNNER_TEMP/youtube-cookies.txt" >> "$GITHUB_ENV"
+          if [ -n "$YOUTUBE_COOKIES" ]; then
+            printf '%s' "$YOUTUBE_COOKIES" > "$RUNNER_TEMP/youtube-cookies.txt"
+            chmod 600 "$RUNNER_TEMP/youtube-cookies.txt"
+            echo "CUTAI_YOUTUBE_COOKIES_FILE=$RUNNER_TEMP/youtube-cookies.txt" >> "$GITHUB_ENV"
+          fi
       - name: Executar captura e análise em paralelo
         env:
           PYTHONPATH: scripts
