@@ -1,12 +1,11 @@
 name: Processar live
-
 'on':
   issues:
     types: [opened, reopened, labeled]
   workflow_dispatch:
     inputs:
       live_url:
-        description: Link da transmissão (live 24h padrão já preenchida)
+        description: Link da transmissão
         required: false
         default: "https://www.youtube.com/live/mz__EMYpWPw?is=xadjmdVR_FDqbedl"
         type: string
@@ -15,15 +14,10 @@ name: Processar live
         required: false
         default: "300"
         type: string
-
 concurrency:
   group: live-${{ github.event.issue.number || github.run_id }}
   cancel-in-progress: false
-
-permissions:
-  contents: write
-  issues: write
-
+permissions: {contents: write, issues: write}
 jobs:
   process:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[LIVE]') || contains(github.event.issue.labels.*.name, 'live-request')
@@ -32,102 +26,52 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
+        with: {python-version: "3.11", cache: pip}
       - name: Instalar ferramentas
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get update && sudo apt-get install -y ffmpeg
           python -m pip install --upgrade pip
           pip install -e '.[ai]'
           pip install 'yt-dlp[default,curl-cffi]'
       - name: Preparar sessão protegida do YouTube
-        env:
-          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+        env: {YOUTUBE_COOKIES: "${{ secrets.YOUTUBE_COOKIES }}"}
         run: |
-          if [ -n "$YOUTUBE_COOKIES" ]; then
-            COOKIE_FILE="$RUNNER_TEMP/youtube-cookies.txt"
-            printf '%s' "$YOUTUBE_COOKIES" > "$COOKIE_FILE"
-            chmod 600 "$COOKIE_FILE"
-            echo "CUTAI_YOUTUBE_COOKIES_FILE=$COOKIE_FILE" >> "$GITHUB_ENV"
-            echo "Sessão do YouTube carregada com segurança."
-          else
-            echo "YOUTUBE_COOKIES não está configurado."
-          fi
+          if [ -n "$YOUTUBE_COOKIES" ]; then COOKIE_FILE="$RUNNER_TEMP/youtube-cookies.txt"; printf '%s' "$YOUTUBE_COOKIES" > "$COOKIE_FILE"; chmod 600 "$COOKIE_FILE"; echo "CUTAI_YOUTUBE_COOKIES_FILE=$COOKIE_FILE" >> "$GITHUB_ENV"; fi
       - name: Extrair link da Issue com segurança
         if: github.event_name == 'issues'
         id: issue
         run: python scripts/parse_issue.py
       - name: Resolver parâmetros
         id: params
-        env:
-          ISSUE_URL: ${{ steps.issue.outputs.url }}
-          INPUT_URL: ${{ inputs.live_url }}
-          INPUT_SECONDS: ${{ inputs.capture_seconds }}
-          DEFAULT_LIVE_URL: "https://www.youtube.com/live/mz__EMYpWPw?is=xadjmdVR_FDqbedl"
+        env: {ISSUE_URL: "${{ steps.issue.outputs.url }}", INPUT_URL: "${{ inputs.live_url }}", INPUT_SECONDS: "${{ inputs.capture_seconds }}", DEFAULT_LIVE_URL: "https://www.youtube.com/live/mz__EMYpWPw?is=xadjmdVR_FDqbedl"}
         run: |
-          URL="${INPUT_URL:-${ISSUE_URL:-$DEFAULT_LIVE_URL}}"
-          SECONDS="${INPUT_SECONDS:-300}"
+          URL="${INPUT_URL:-${ISSUE_URL:-$DEFAULT_LIVE_URL}}"; SECONDS="${INPUT_SECONDS:-300}"
           if ! [[ "$SECONDS" =~ ^[0-9]+$ ]] || (( SECONDS < 60 || SECONDS > 900 )); then SECONDS=300; fi
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
-          echo "seconds=$SECONDS" >> "$GITHUB_OUTPUT"
-      - name: Capturar, analisar e criar Top 3
-        env:
-          WHISPER_MODEL: small
-          WHISPER_LANGUAGE: pt
-          CUTAI_PROXY_URL: ${{ secrets.CUTAI_PROXY_URL }}
+          echo "url=$URL" >> "$GITHUB_OUTPUT"; echo "seconds=$SECONDS" >> "$GITHUB_OUTPUT"
+      - name: Capturar e analisar
+        env: {WHISPER_MODEL: small, WHISPER_LANGUAGE: pt, CUTAI_PROXY_URL: "${{ secrets.CUTAI_PROXY_URL }}"}
         run: python -m cutai.pipeline --url "${{ steps.params.outputs.url }}" --capture-seconds "${{ steps.params.outputs.seconds }}" --workdir work
       - name: Ler resultado
         id: result
         run: python scripts/export_top3_outputs.py work/result.json "$GITHUB_OUTPUT"
-      - name: Criar Release 1
-        if: steps.result.outputs.clip1 != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CLIP_ID: ${{ steps.result.outputs.clip1 }}
+      - name: Criar Releases
+        env: {GH_TOKEN: "${{ github.token }}", C1: "${{ steps.result.outputs.clip1 }}", C2: "${{ steps.result.outputs.clip2 }}", C3: "${{ steps.result.outputs.clip3 }}"}
         run: |
-          TAG="clip-$CLIP_ID"
-          gh release create "$TAG" "work/$CLIP_ID.mp4" "work/$CLIP_ID.jpg" --title "CutCutAi · Top 1 · $CLIP_ID" --notes "Corte Top 1 gerado automaticamente pelo CutCutAi."
-          BASE="https://github.com/${{ github.repository }}/releases/download/$TAG"
-          python scripts/update_release_metadata.py --ranking data/ranking.json --clip "$CLIP_ID" --asset-url "$BASE/$CLIP_ID.mp4" --thumbnail-url "$BASE/$CLIP_ID.jpg" --tag "$TAG"
-      - name: Criar Release 2
-        if: steps.result.outputs.clip2 != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CLIP_ID: ${{ steps.result.outputs.clip2 }}
-        run: |
-          TAG="clip-$CLIP_ID"
-          gh release create "$TAG" "work/$CLIP_ID.mp4" "work/$CLIP_ID.jpg" --title "CutCutAi · Top 2 · $CLIP_ID" --notes "Corte Top 2 gerado automaticamente pelo CutCutAi."
-          BASE="https://github.com/${{ github.repository }}/releases/download/$TAG"
-          python scripts/update_release_metadata.py --ranking data/ranking.json --clip "$CLIP_ID" --asset-url "$BASE/$CLIP_ID.mp4" --thumbnail-url "$BASE/$CLIP_ID.jpg" --tag "$TAG"
-      - name: Criar Release 3
-        if: steps.result.outputs.clip3 != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CLIP_ID: ${{ steps.result.outputs.clip3 }}
-        run: |
-          TAG="clip-$CLIP_ID"
-          gh release create "$TAG" "work/$CLIP_ID.mp4" "work/$CLIP_ID.jpg" --title "CutCutAi · Top 3 · $CLIP_ID" --notes "Corte Top 3 gerado automaticamente pelo CutCutAi."
-          BASE="https://github.com/${{ github.repository }}/releases/download/$TAG"
-          python scripts/update_release_metadata.py --ranking data/ranking.json --clip "$CLIP_ID" --asset-url "$BASE/$CLIP_ID.mp4" --thumbnail-url "$BASE/$CLIP_ID.jpg" --tag "$TAG"
+          rank=0
+          for CLIP_ID in "$C1" "$C2" "$C3"; do
+            [ -z "$CLIP_ID" ] && continue; rank=$((rank+1)); TAG="clip-$CLIP_ID"
+            gh release create "$TAG" "work/$CLIP_ID.mp4" "work/$CLIP_ID.jpg" "work/$CLIP_ID.captions.json" --title "CutCutAi · Top $rank · $CLIP_ID" --notes "Corte limpo e trilha de legendas editável gerados automaticamente pelo CutCutAi."
+            BASE="https://github.com/${{ github.repository }}/releases/download/$TAG"
+            python scripts/update_release_metadata.py --ranking data/ranking.json --clip "$CLIP_ID" --asset-url "$BASE/$CLIP_ID.mp4" --thumbnail-url "$BASE/$CLIP_ID.jpg" --tag "$TAG"
+          done
       - name: Atualizar ranking
         run: |
-          git config user.name "cutcutai-bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add data/ranking.json
-          git commit -m "data: adicionar cortes Top 3 da live"
-          git pull --rebase
-          git push
+          git config user.name cutcutai-bot; git config user.email actions@users.noreply.github.com
+          git add data/ranking.json; git commit -m "data: adicionar cortes da live" || true; git pull --rebase; git push
       - name: Comentar resultado
         if: github.event_name == 'issues'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CLIP1: ${{ steps.result.outputs.clip1 }}
-          CLIP2: ${{ steps.result.outputs.clip2 }}
-          CLIP3: ${{ steps.result.outputs.clip3 }}
-        run: |
-          gh issue comment "${{ github.event.issue.number }}" --body "Top cortes concluídos - $CLIP1 $CLIP2 $CLIP3. O ranking foi atualizado no site."
+        env: {GH_TOKEN: "${{ github.token }}", CLIP1: "${{ steps.result.outputs.clip1 }}", CLIP2: "${{ steps.result.outputs.clip2 }}", CLIP3: "${{ steps.result.outputs.clip3 }}"}
+        run: gh issue comment "${{ github.event.issue.number }}" --body "Cortes limpos concluídos - $CLIP1 $CLIP2 $CLIP3. Legendas sincronizadas publicadas separadamente para edição."
       - name: Limpar sessão do YouTube
         if: always()
         run: rm -f "$RUNNER_TEMP/youtube-cookies.txt"
