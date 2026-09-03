@@ -19,7 +19,8 @@ from .validation import validate_source_url
 MIN_CLIP_SECONDS = 60.0
 MAX_CLIP_SECONDS = 150.0
 DEFAULT_CAPTURE_SECONDS = 360
-RANKING_PATH = Path("data/ranking.json")
+_DATA_ROOT = os.getenv("CUTAI_DATA_ROOT", "").strip()
+RANKING_PATH = Path(os.getenv("CUTAI_RANKING_PATH", str(Path(_DATA_ROOT) / "ranking.json" if _DATA_ROOT else Path("data/ranking.json"))))
 
 
 def download(url: str, output: Path, seconds: int) -> str:
@@ -146,13 +147,17 @@ def process_source(source: Path, source_url: str, workdir: Path, source_title: s
     for rank,(context_score,start,end,signals) in enumerate(ranges,1):
         fingerprint=f"{source_url}:{source.name}:{round(start,1)}:{round(end,1)}"; clip_id=hashlib.sha1(fingerprint.encode()).hexdigest()[:12]; clip_path=workdir/f"{clip_id}.mp4"; thumb=workdir/f"{clip_id}.jpg"; captions_path=workdir/f"{clip_id}.captions.json"
         make_clip_range(source,clip_path,start,end); local=_caption_track(segments,start,end); captions_path.write_text(json.dumps({"version":1,"clip_id":clip_id,"language":"pt","segments":local,"default_style":{"enabled":False}},ensure_ascii=False,indent=2)+"\n",encoding="utf-8"); thumbnail(clip_path,thumb); transcript=" ".join(s["text"] for s in local).strip(); mean,peak=audio_metrics(clip_path); a_score,a_reasons=audio_score(mean,peak); t_score,t_reasons=transcript_score(transcript); s_score=scene_score(clip_path); base=combine_scores(a_score,t_score,s_score); base.total=round(min(100.0,base.total*.50+context_score*.50),2); description,hashtags=suggest_metadata(transcript); reasons=a_reasons+t_reasons+[f"história/viral {context_score:.0f}/100",f"gancho {signals['hook']:.0f}/100",f"emoção {signals['emotion']:.0f}/100",f"surpresa {signals['surprise']:.0f}/100",f"tensão {signals['conflict']:.0f}/100",f"entrega {signals['payoff']:.0f}/100",f"cena {s_score:.0f}/100",f"duração {end-start:.1f}s","final natural confirmado","legendas disponíveis para edição"]; breakdown={"audio":round(a_score,2),"transcript":round(t_score,2),"scene":round(s_score,2),"context":round(context_score,2),**{k:round(v,2) for k,v in signals.items()}}; clip=Clip(id=clip_id,title=source_title,source_title=source_title,score=base,score_breakdown=breakdown,duration=round(end-start,2),source_url=source_url,asset_url="",thumbnail_url="",transcript=transcript,reasons=reasons,description=description,hashtags=hashtags,created_at=datetime.now(UTC).isoformat()); upsert_clip(RANKING_PATH,clip); clips.append(clip)
-    clips.sort(key=lambda c:c.score.total,reverse=True); return clips[:3]
+    return clips
 
-def process(url: str, workdir: Path, capture_seconds: int=DEFAULT_CAPTURE_SECONDS) -> list[Clip]:
-    validate_source_url(url); workdir.mkdir(parents=True,exist_ok=True); source=workdir/"capture.mkv"; source_title=download(url,source,max(60,min(capture_seconds,900))); clips=process_source(source,url,workdir,source_title)
-    if not clips: raise RuntimeError("Nenhuma história autocontida com final natural foi encontrada. O sistema recusou cortar um assunto claramente em andamento.")
+def process(url: str,workdir: Path,capture_seconds: int=DEFAULT_CAPTURE_SECONDS)->list[Clip]:
+    validate_source_url(url); workdir.mkdir(parents=True,exist_ok=True); source=workdir/"source.mkv"; source_title=download(url,source,capture_seconds); clips=process_source(source,url,workdir,source_title)
+    if not clips: raise RuntimeError("A captura não continha uma história completa e forte o bastante para virar corte. Tente uma janela maior ou outra live.")
     return clips
 
 def main()->None:
-    parser=argparse.ArgumentParser(); parser.add_argument("--url",required=True); parser.add_argument("--capture-seconds",type=int,default=DEFAULT_CAPTURE_SECONDS); parser.add_argument("--workdir",default="work"); parser.add_argument("--source",type=Path,default=None); parser.add_argument("--source-title",default="Live"); args=parser.parse_args(); clips=process_source(args.source,args.url,Path(args.workdir),args.source_title) if args.source else process(args.url,Path(args.workdir),args.capture_seconds); Path(args.workdir,"result.json").write_text(json.dumps({"clips":[c.to_dict() for c in clips]},ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+    parser=argparse.ArgumentParser(); parser.add_argument("url",nargs="?"); parser.add_argument("--source",type=Path); parser.add_argument("--source-url",default="local-buffer"); parser.add_argument("--source-title",default="Live"); parser.add_argument("--workdir",type=Path,default=Path("work")); parser.add_argument("--capture-seconds",type=int,default=DEFAULT_CAPTURE_SECONDS); args=parser.parse_args()
+    if args.source: clips=process_source(args.source,args.source_url,args.workdir,args.source_title)
+    elif args.url: clips=process(args.url,args.workdir,args.capture_seconds)
+    else: parser.error("informe uma URL ou use --source")
+    print(json.dumps({"clips":[c.to_dict() for c in clips]},ensure_ascii=False,default=lambda o:o.__dict__,indent=2))
 if __name__=="__main__": main()
