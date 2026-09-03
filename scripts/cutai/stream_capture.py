@@ -1,8 +1,9 @@
-"""Captura uma live em uma única sessão e produz segmentos locais contínuos.
+"""Captura contínua de lives com autenticação opcional.
 
-O processo yt-dlp permanece conectado à transmissão. ffmpeg segmenta o fluxo
-localmente; assim o analisador não precisa reconectar ao ponto atual da live a
-cada janela. Os segmentos são pequenos e podem alimentar um buffer deslizante.
+Para YouTube público, o caminho padrão é anônimo: yt-dlp usa clientes adequados
+para live/HLS e, quando instalado, um PO Token Provider automático. Cookies de
+conta ficam apenas como fallback explícito para conteúdo que realmente exige
+login (privado, membros, restrição de idade etc.).
 """
 from __future__ import annotations
 
@@ -25,19 +26,33 @@ def build_command(url: str, output_dir: Path, segment_seconds: int) -> list[str]
         "--impersonate", "chrome", "--extractor-retries", "5",
         "--fragment-retries", "10", "--retry-sleep", "extractor:2",
         "--js-runtimes", "node", "-f",
-        "bestvideo[height=1080][fps<=30]+bestaudio/bestvideo[height<=1080][fps<=30]+bestaudio/best[height<=1080][fps<=30]/best",
+        "bestvideo[height<=1080][fps<=30]+bestaudio/best[height<=1080][fps<=30]/best",
         "--downloader", "ffmpeg",
         "--downloader-args",
-        f"ffmpeg_i:-map 0:v:0 -map 0:a:0? -c copy -f segment -segment_time {segment_seconds} -reset_timestamps 1",
+        f"ffmpeg_o:-c copy -f segment -segment_time {segment_seconds} -reset_timestamps 1",
         "-o", str(pattern),
     ]
+
+    # Conta/cookies não fazem parte do caminho normal. Só habilitamos quando o
+    # operador pede explicitamente, para fontes que realmente exigem login.
     cookie_file = os.getenv("CUTAI_YOUTUBE_COOKIES_FILE", "").strip()
+    use_cookies = os.getenv("CUTAI_USE_YOUTUBE_COOKIES", "").strip().lower() in {"1", "true", "yes"}
     user_agent = os.getenv("CUTAI_YOUTUBE_USER_AGENT", "").strip()
     proxy_url = normalize_proxy_url(os.getenv("CUTAI_PROXY_URL", ""))
-    if cookie_file and Path(cookie_file).exists(): command += ["--cookies", cookie_file]
-    if user_agent: command += ["--user-agent", user_agent]
-    if proxy_url: command += ["--proxy", proxy_url]
-    command += ["--extractor-args", "youtube:player_client=tv,web_safari;formats=missing_pot", url]
+    if use_cookies and cookie_file and Path(cookie_file).exists():
+        command += ["--cookies", cookie_file]
+    if user_agent:
+        command += ["--user-agent", user_agent]
+    if proxy_url:
+        command += ["--proxy", proxy_url]
+
+    # HLS de lives (exceto cliente iOS) não exige GVS PO Token atualmente. O
+    # mweb fica disponível para o provider automático quando necessário.
+    command += [
+        "--extractor-args",
+        "youtube:player_client=web_safari,mweb;formats=missing_pot",
+        url,
+    ]
     return command
 
 
@@ -50,7 +65,8 @@ def capture(url: str, output_dir: Path, segment_seconds: int = 30) -> int:
 
     def stop(*_: object) -> None:
         nonlocal stopping
-        if stopping: return
+        if stopping:
+            return
         stopping = True
         process.terminate()
 
@@ -61,8 +77,10 @@ def capture(url: str, output_dir: Path, segment_seconds: int = 30) -> int:
     finally:
         if process.poll() is None:
             process.terminate()
-            try: process.wait(timeout=10)
-            except subprocess.TimeoutExpired: process.kill()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
 
 
 def ready_segments(output_dir: Path, settle_seconds: float = 2.0) -> list[Path]:
