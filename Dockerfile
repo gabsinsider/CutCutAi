@@ -2,7 +2,8 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    CUTAI_DATA_ROOT=/data/cutcutai
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
@@ -18,5 +19,4 @@ RUN pip install --upgrade pip \
 RUN mkdir -p /data/cutcutai
 VOLUME ["/data/cutcutai"]
 
-ENTRYPOINT ["python", "-m", "cutai.live_supervisor"]
-CMD ["--help"]
+CMD ["python", "-m", "cutai.worker_api"]
