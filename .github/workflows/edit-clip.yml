@@ -1,18 +1,13 @@
 name: Editar corte
-
 on:
   issues:
     types: [opened, labeled]
   workflow_dispatch:
     inputs:
       clip_id: {description: ID do corte, required: true, type: string}
-      filter: {description: "none, vivid, cinematic ou mono", default: none, type: choice, options: [none, vivid, cinematic, mono]}
-      resolution: {description: Resolução vertical, default: "1080", type: choice, options: ["720", "1080", "2160"]}
-
-permissions:
-  contents: write
-  issues: write
-
+      filter: {description: Filtro, default: none, type: choice, options: [none, vivid, cinematic, mono]}
+      resolution: {description: Resolução, default: "1080", type: choice, options: ["720", "1080", "2160"]}
+permissions: {contents: write, issues: write}
 jobs:
   edit:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[EDIT]') || contains(github.event.issue.labels.*.name, 'edit-request')
@@ -25,34 +20,43 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Interpretar pedido
         id: request
-        env:
-          BODY: ${{ github.event.issue.body }}
-          INPUT_ID: ${{ inputs.clip_id }}
-          INPUT_FILTER: ${{ inputs.filter }}
-          INPUT_RESOLUTION: ${{ inputs.resolution }}
+        env: {BODY: "${{ github.event.issue.body }}", INPUT_ID: "${{ inputs.clip_id }}", INPUT_FILTER: "${{ inputs.filter }}", INPUT_RESOLUTION: "${{ inputs.resolution }}"}
         run: |
           python - <<'PY'
           import os,re
           body=os.environ.get('BODY','')
-          def field(pattern, fallback):
-              match=re.search(pattern,body,re.I)
-              return match.group(1).strip() if match else fallback
-          clip=field(r'## Corte\s+([a-f0-9]{12})',os.environ.get('INPUT_ID',''))
-          filt=field(r'- Filtro:\s*(\w+)',os.environ.get('INPUT_FILTER','none'))
-          res=field(r'- Resolução:\s*(\d+)',os.environ.get('INPUT_RESOLUTION','1080'))
+          def field(label,fallback):
+              m=re.search(r'- '+re.escape(label)+r':\s*([^\n\r]+)',body,re.I); return m.group(1).strip() if m else fallback
+          m=re.search(r'## Corte\s+([a-f0-9]{12})',body,re.I); clip=m.group(1) if m else os.environ.get('INPUT_ID','')
           if not re.fullmatch(r'[a-f0-9]{12}',clip): raise SystemExit('ID inválido')
-          if filt not in {'none','vivid','cinematic','mono'}: filt='none'
-          if res not in {'720','1080','2160'}: res='1080'
-          with open(os.environ['GITHUB_OUTPUT'],'a') as f: f.write(f'clip={clip}\nfilter={filt}\nresolution={res}\n')
+          values={'clip':clip,'filter':field('Filtro',os.environ.get('INPUT_FILTER','none')),'resolution':field('Resolução',os.environ.get('INPUT_RESOLUTION','1080')),'caption_style':field('Legenda','none'),'caption_color':field('Cor','#FFFFFF'),'highlight_color':field('Destaque','#FFFF00'),'position':field('Posição','bottom'),'size':field('Tamanho','62'),'emphasis':field('Ênfase automática','sim')}
+          values['filter']=values['filter'] if values['filter'] in {'none','vivid','cinematic','mono'} else 'none'; values['resolution']=values['resolution'] if values['resolution'] in {'720','1080','2160'} else '1080'; values['position']=values['position'] if values['position'] in {'top','center','bottom'} else 'bottom'; values['emphasis']='yes' if values['emphasis'].lower() in {'sim','yes','true','1'} else 'no'
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:
+              for k,v in values.items(): f.write(f'{k}={v}\n')
           PY
-      - name: Localizar e baixar corte
+      - name: Baixar corte e legendas
         env: {GH_TOKEN: "${{ github.token }}"}
-        run: gh release download "clip-${{ steps.request.outputs.clip }}" --pattern '*.mp4' --dir work
-      - name: Renderizar
-        run: PYTHONPATH=scripts python -m cutai.editor --source "work/${{ steps.request.outputs.clip }}.mp4" --output "work/${{ steps.request.outputs.clip }}-edited.mp4" --filter "${{ steps.request.outputs.filter }}" --resolution "${{ steps.request.outputs.resolution }}"
+        run: |
+          mkdir -p work
+          gh release download "clip-${{ steps.request.outputs.clip }}" --pattern "${{ steps.request.outputs.clip }}.mp4" --dir work
+          gh release download "clip-${{ steps.request.outputs.clip }}" --pattern "${{ steps.request.outputs.clip }}.captions.json" --dir work || true
+      - name: Renderizar escolhas do usuário
+        run: >-
+          PYTHONPATH=scripts python -m cutai.editor
+          --source "work/${{ steps.request.outputs.clip }}.mp4"
+          --output "work/${{ steps.request.outputs.clip }}-edited.mp4"
+          --filter "${{ steps.request.outputs.filter }}"
+          --resolution "${{ steps.request.outputs.resolution }}"
+          --captions "work/${{ steps.request.outputs.clip }}.captions.json"
+          --caption-style "${{ steps.request.outputs.caption_style }}"
+          --caption-color "${{ steps.request.outputs.caption_color }}"
+          --highlight-color "${{ steps.request.outputs.highlight_color }}"
+          --caption-position "${{ steps.request.outputs.position }}"
+          --caption-size "${{ steps.request.outputs.size }}"
+          --auto-emphasis "${{ steps.request.outputs.emphasis }}"
       - name: Publicar exportação
         env: {GH_TOKEN: "${{ github.token }}"}
         run: gh release upload "clip-${{ steps.request.outputs.clip }}" "work/${{ steps.request.outputs.clip }}-edited.mp4" --clobber
       - if: github.event_name == 'issues'
         env: {GH_TOKEN: "${{ github.token }}"}
-        run: gh issue comment "${{ github.event.issue.number }}" --body "Exportação concluída e anexada ao Release do corte."
+        run: gh issue comment "${{ github.event.issue.number }}" --body "Exportação concluída com as escolhas do editor e anexada ao Release do corte."
