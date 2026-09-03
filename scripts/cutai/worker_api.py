@@ -13,6 +13,32 @@ def _read_json(path):
     try:return json.loads(path.read_text(encoding="utf-8"))
     except (OSError,ValueError,TypeError):return {}
 def _write_json(path,data):path.parent.mkdir(parents=True,exist_ok=True);path.write_text(json.dumps(data,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+def _cleanup_storage():
+    """Remove apenas artefatos regeneráveis; nunca MP4/JPG/captions finais."""
+    removed=0;freed=0
+    sessions=ROOT/"sessions"
+    roots=[p for p in sessions.iterdir() if p.is_dir()] if sessions.exists() else []
+    legacy=ROOT/"continuous-live"
+    if legacy.exists():roots.append(legacy)
+    for root in roots:
+        # Janelas concatenadas são temporárias e podem ocupar centenas de MB cada.
+        for p in root.rglob("window-segment-*.mkv"):
+            try:freed+=p.stat().st_size;p.unlink();removed+=1
+            except OSError:pass
+        for p in root.rglob("window-segment-*.txt"):
+            try:freed+=p.stat().st_size;p.unlink();removed+=1
+            except OSError:pass
+        # Segmentos de sessões já encerradas são descartáveis; os cortes finais
+        # ficam em analysis-* e são preservados para Ranking/Assistir.
+        meta=_read_json(root/"session.json")
+        if meta.get("status") in {"stopped","finished"} or root==legacy:
+            stream=root/"stream"
+            if stream.exists():
+                for p in stream.glob("segment-*.mkv"):
+                    try:freed+=p.stat().st_size;p.unlink();removed+=1
+                    except OSError:pass
+    if removed:print(f"[worker-api] limpeza segura: {removed} temporário(s), {freed/1024/1024:.1f} MiB liberados",flush=True)
+    return removed,freed
 def _state():
     running=bool(_process and _process.poll() is None);root=_session_root();detail=_read_json(root/"supervisor.json") if root else {}
     return {"ok":True,"running":running,"url":_current_url if running else None,"session_id":_session_id,"supervisor":detail}
@@ -32,10 +58,10 @@ def _stop(mark_stopped=True):
     if mark_stopped and root:
         meta=_read_json(root/"session.json");meta.update({"status":"stopped","stopped_at":datetime.now(UTC).isoformat()});_write_json(root/"session.json",meta)
     _process=None;_current_url=None
+    if mark_stopped:_cleanup_storage()
 def _start(url):
-    _stop();sid=_session(url);root=ROOT/"sessions"/sid;root.mkdir(parents=True,exist_ok=True);_write_json(root/"session.json",{"id":sid,"url":url,"status":"active","started_at":datetime.now(UTC).isoformat(),"resume_count":0});_launch(url,sid)
+    _stop();_cleanup_storage();sid=_session(url);root=ROOT/"sessions"/sid;root.mkdir(parents=True,exist_ok=True);_write_json(root/"session.json",{"id":sid,"url":url,"status":"active","started_at":datetime.now(UTC).isoformat(),"resume_count":0});_launch(url,sid)
 def _recover():
-    """Retoma a sessão que estava ativa antes de um restart/deploy do container."""
     sessions=ROOT/"sessions"
     if not sessions.exists():return False
     candidates=[]
@@ -133,14 +159,12 @@ class Handler(BaseHTTPRequestHandler):
         else:self._send(404,{"ok":False,"error":"not_found"})
     def log_message(self,fmt,*args):print(f"[worker-api] {self.address_string()} {fmt % args}",flush=True)
 def main():
-    ROOT.mkdir(parents=True,exist_ok=True)
+    ROOT.mkdir(parents=True,exist_ok=True);_cleanup_storage()
     with _lock:_recover()
     server=ThreadingHTTPServer(("0.0.0.0",PORT),Handler);print(f"CutCutAi worker API ouvindo em 0.0.0.0:{PORT}",flush=True)
     try:server.serve_forever()
     except KeyboardInterrupt:pass
     finally:
-        # Encerramento do container não equivale a pedido do usuário: mantemos a
-        # sessão marcada ativa para que o próximo processo possa retomá-la.
         with _lock:_stop(mark_stopped=False)
         server.server_close()
 if __name__=="__main__":main()
