@@ -1,6 +1,6 @@
 """API HTTP persistente que recebe lives, controla o supervisor e serve os cortes."""
 from __future__ import annotations
-import json, mimetypes, os, signal, subprocess, sys, threading
+import json, mimetypes, os, re, signal, subprocess, sys, threading
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -39,15 +39,21 @@ def _clip_files():
         result.setdefault(cid,{})[kind]=path
     return result
 
-def _ranking():
+def _public_base(handler=None):
+    configured=os.getenv("CUTAI_PUBLIC_BASE_URL","").strip().rstrip("/")
+    if configured: return configured
+    if handler:
+        proto=handler.headers.get("X-Forwarded-Proto","https").split(",")[0].strip(); host=handler.headers.get("X-Forwarded-Host") or handler.headers.get("Host")
+        if host: return f"{proto}://{host}".rstrip("/")
+    return ""
+
+def _ranking(handler=None):
     files=_clip_files(); rows=[]; ranking_path=Path(os.getenv("CUTAI_RANKING_PATH",str(ROOT/"ranking.json")))
-    # Compatibilidade com cortes criados antes da migração do ranking para o volume.
     for candidate in (ranking_path,Path("data/ranking.json")):
         try:
-            loaded=json.loads(candidate.read_text(encoding="utf-8")).get("clips",[])
-            known={str(r.get("id","")) for r in rows}; rows.extend(r for r in loaded if str(r.get("id","")) not in known)
+            loaded=json.loads(candidate.read_text(encoding="utf-8")).get("clips",[]); known={str(r.get("id","")) for r in rows}; rows.extend(r for r in loaded if str(r.get("id","")) not in known)
         except (OSError,ValueError,TypeError): pass
-    by_id={str(r.get("id","")):r for r in rows}; clips=[]; base=os.getenv("CUTAI_PUBLIC_BASE_URL","").rstrip("/"); prefix=f"{base}/media" if base else "/media"
+    by_id={str(r.get("id","")):r for r in rows}; clips=[]; base=_public_base(handler); prefix=f"{base}/media" if base else "/media"
     for cid,found in files.items():
         if "asset" not in found: continue
         row=dict(by_id.get(cid,{"id":cid,"title":"Corte da live","source_title":"Live contínua","created_at":datetime.fromtimestamp(found["asset"].stat().st_mtime,UTC).isoformat(),"duration":0,"score":0,"score_breakdown":{},"transcript":"","description":"Corte recuperado do processamento contínuo.","hashtags":[],"reasons":[]}))
@@ -59,22 +65,34 @@ def _ranking():
 
 class Handler(BaseHTTPRequestHandler):
     def _cors(self):
-        self.send_header("Access-Control-Allow-Origin",os.getenv("CUTAI_ALLOWED_ORIGIN","*"));self.send_header("Access-Control-Allow-Headers","Content-Type, Authorization");self.send_header("Access-Control-Allow-Methods","GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Origin",os.getenv("CUTAI_ALLOWED_ORIGIN","*"));self.send_header("Access-Control-Allow-Headers","Content-Type, Authorization, Range");self.send_header("Access-Control-Allow-Methods","GET, POST, OPTIONS");self.send_header("Access-Control-Expose-Headers","Content-Length, Content-Range, Accept-Ranges")
     def _send(self,code,payload):
         body=json.dumps(payload,ensure_ascii=False).encode();self.send_response(code);self.send_header("Content-Type","application/json; charset=utf-8");self.send_header("Content-Length",str(len(body)));self._cors();self.end_headers();self.wfile.write(body)
     def _send_file(self,path):
         if not path.is_file():self._send(404,{"ok":False,"error":"not_found"});return
-        self.send_response(200);self.send_header("Content-Type",mimetypes.guess_type(path.name)[0] or "application/octet-stream");self.send_header("Content-Length",str(path.stat().st_size));self.send_header("Accept-Ranges","bytes");self._cors();self.end_headers()
+        size=path.stat().st_size; start=0; end=size-1; range_header=self.headers.get("Range","")
+        if range_header:
+            match=re.match(r"bytes=(\d*)-(\d*)",range_header)
+            if match:
+                if match.group(1): start=int(match.group(1))
+                if match.group(2): end=min(int(match.group(2)),size-1)
+                elif start: end=size-1
+                if start>=size or start>end:
+                    self.send_response(416);self.send_header("Content-Range",f"bytes */{size}");self._cors();self.end_headers();return
+        length=end-start+1; self.send_response(206 if range_header else 200);self.send_header("Content-Type",mimetypes.guess_type(path.name)[0] or "application/octet-stream");self.send_header("Content-Length",str(length));self.send_header("Accept-Ranges","bytes")
+        if range_header:self.send_header("Content-Range",f"bytes {start}-{end}/{size}")
+        self._cors();self.end_headers()
         with path.open("rb") as fh:
-            while True:
-                chunk=fh.read(1024*1024)
+            fh.seek(start); remaining=length
+            while remaining>0:
+                chunk=fh.read(min(1024*1024,remaining))
                 if not chunk:break
-                self.wfile.write(chunk)
+                self.wfile.write(chunk);remaining-=len(chunk)
     def do_OPTIONS(self):self._send(204,{})
     def do_GET(self):
         p=urlparse(self.path).path
         if p in {"/","/health","/status"}:self._send(200,_state());return
-        if p=="/ranking":self._send(200,_ranking());return
+        if p=="/ranking":self._send(200,_ranking(self));return
         if p.startswith("/media/"):
             filename=Path(unquote(p[len("/media/"):])).name;cid=filename.split(".",1)[0];found=_clip_files().get(cid,{})
             path=found.get("captions") if filename.endswith(".captions.json") else found.get("asset") if filename.endswith(".mp4") else found.get("thumbnail") if filename.endswith(".jpg") else None
