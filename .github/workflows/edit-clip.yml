@@ -1,5 +1,5 @@
 name: Editar corte
-on:
+'on':
   issues:
     types: [opened, labeled]
   workflow_dispatch:
@@ -74,6 +74,8 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "file=$FILE" >> "$GITHUB_OUTPUT"
           echo "url=$URL" >> "$GITHUB_OUTPUT"
-      - if: github.event_name == 'issues'
+      - name: Comentar exportação
+        if: github.event_name == 'issues'
         env: {GH_TOKEN: "${{ github.token }}", EXPORT_URL: "${{ steps.publish.outputs.url }}"}
-        run: gh issue comment "${{ github.event.issue.number }}" --body "Exportação concluída. O corte original foi preservado. Vídeo final: $EXPORT_URL"
+        run: |
+          gh issue comment "${{ github.event.issue.number }}" --body "Exportação concluída. O corte original foi preservado. Vídeo final: $EXPORT_URL"
