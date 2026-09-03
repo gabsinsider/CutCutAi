@@ -10,69 +10,12 @@
 <body>
   <header class="topbar">
     <a class="brand" href="#"><span class="brand-mark">C</span>CutCutAi</a>
-    <nav aria-label="Principal">
-      <button class="nav-item active" data-view="ranking">Ranking</button>
-      <button class="nav-item" data-view="editor">Editor</button>
-      <button class="nav-item" data-view="about">Limites</button>
-    </nav>
+    <nav aria-label="Principal"><button class="nav-item active" data-view="ranking">Ranking</button><button class="nav-item" data-view="editor">Editor</button><button class="nav-item" data-view="about">Limites</button></nav>
   </header>
-
   <main>
-    <section class="hero">
-      <div>
-        <p class="eyebrow">IA PARA CONTEÚDO CURTO</p>
-        <h1>Da live ao corte<br><span>que merece viralizar.</span></h1>
-        <p class="lead">Cole o link de uma transmissão. O processamento em segmentos encontra momentos fortes, cria cortes e organiza tudo por potencial.</p>
-      </div>
-      <form id="live-form" class="capture-card">
-        <label for="live-url">Link da transmissão</label>
-        <div class="input-row">
-          <input id="live-url" type="url" required placeholder="https://youtube.com/live/…" autocomplete="url">
-          <button type="submit">Analisar live</button>
-        </div>
-        <p id="platform-hint" class="hint">YouTube, Facebook, TikTok, Twitch e fontes aceitas pelo yt-dlp.</p>
-      </form>
-    </section>
-
-    <section id="ranking" class="view active">
-      <div class="section-head">
-        <div><p class="eyebrow">MELHORES MOMENTOS</p><h2>Ranking de cortes</h2></div>
-        <button id="refresh" class="secondary">Atualizar</button>
-      </div>
-      <div id="ranking-grid" class="ranking-grid" aria-live="polite"></div>
-      <div id="empty-state" class="empty-state" hidden>
-        <span>✦</span><h3>Nenhum corte ainda</h3><p>Envie a primeira live para começar o ranking.</p>
-      </div>
-    </section>
-
-    <section id="editor" class="view">
-      <div class="section-head"><div><p class="eyebrow">PÓS-PRODUÇÃO</p><h2>Editor de cortes</h2></div></div>
-      <div class="editor-grid">
-        <div class="preview-panel"><div id="video-placeholder"><span>▶</span><p>Selecione um corte do ranking</p></div><video id="preview" controls hidden></video></div>
-        <form id="edit-form" class="controls">
-          <label>Corte<select id="clip-select" required><option value="">Selecione…</option></select></label>
-          <label>Estilo de legenda<select id="caption-style"><option value="viral">Viral (grande e dinâmica)</option><option value="clean">Clean</option><option value="none">Sem legenda</option></select></label>
-          <label>Filtro<select id="filter"><option value="none">Original</option><option value="vivid">Vibrante</option><option value="cinematic">Cinematográfico</option><option value="mono">Preto e branco</option></select></label>
-          <label>Resolução<select id="resolution"><option value="1080">Full HD · recomendado</option><option value="720">HD · mais rápido</option><option value="2160">4K · processamento lento</option></select></label>
-          <label>Narração<textarea id="narration" rows="3" maxlength="500" placeholder="Texto opcional para voz…"></textarea></label>
-          <p id="quality-warning" class="warning" hidden>4K usa CPU e pode consumir muitos minutos do GitHub Actions.</p>
-          <button type="submit">Solicitar exportação</button>
-        </form>
-      </div>
-    </section>
-
-    <section id="about" class="view limits">
-      <p class="eyebrow">TRANSPARÊNCIA</p><h2>O que acontece nos bastidores</h2>
-      <div class="limit-grid">
-        <article><b>Processamento incremental</b><p>A live é baixada e analisada em lotes. Não há uma IA assistindo em tempo real.</p></article>
-        <article><b>IA leve em CPU</b><p>Whisper tiny roda sem GPU; é econômico, mas pode errar mais que modelos maiores.</p></article>
-        <article><b>Cotas do GitHub</b><p>Repositórios privados têm minutos limitados e cada job pode durar no máximo 6 horas.</p></article>
-        <article><b>4K leva mais tempo</b><p>A renderização acontece em CPU. Vídeos ficam em Releases, fora do histórico Git.</p></article>
-      </div>
-    </section>
-  </main>
-  <div id="toast" role="status" aria-live="polite"></div>
-  <script src="app.js"></script>
-</body>
-</html>
-
+    <section class="hero"><div><p class="eyebrow">IA PARA CONTEÚDO CURTO</p><h1>Da live ao corte<br><span>que merece viralizar.</span></h1><p class="lead">Cole o link de uma transmissão. A IA encontra histórias fortes e entrega cortes limpos para você finalizar.</p></div><form id="live-form" class="capture-card"><label for="live-url">Link da transmissão</label><div class="input-row"><input id="live-url" type="url" required placeholder="https://youtube.com/live/…" autocomplete="url"><button type="submit">Analisar live</button></div><p id="platform-hint" class="hint">YouTube e fontes compatíveis com yt-dlp.</p></form></section>
+    <section id="ranking" class="view active"><div class="section-head"><div><p class="eyebrow">MELHORES MOMENTOS</p><h2>Ranking de cortes</h2></div><button id="refresh" class="secondary">Atualizar</button></div><div id="ranking-grid" class="ranking-grid" aria-live="polite"></div><div id="empty-state" class="empty-state" hidden><span>✦</span><h3>Nenhum corte ainda</h3><p>Envie a primeira live para começar o ranking.</p></div></section>
+    <section id="editor" class="view"><div class="section-head"><div><p class="eyebrow">PÓS-PRODUÇÃO</p><h2>Editor de cortes</h2></div></div><div class="editor-grid"><div class="preview-panel"><div id="video-placeholder"><span>▶</span><p>Selecione um corte do ranking</p></div><div id="preview-stage" class="preview-stage" hidden><video id="preview" controls></video><div id="caption-preview" class="caption-preview">Sua legenda aparece aqui</div></div></div><form id="edit-form" class="controls"><label>Corte<select id="clip-select" required><option value="">Selecione…</option></select></label><label>Legenda<select id="caption-style"><option value="none">Sem legenda</option><option value="viral">Viral</option><option value="clean">Clean</option></select></label><div id="caption-controls"><label>Cor da legenda<input id="caption-color" type="color" value="#ffffff"></label><label>Cor do destaque<input id="highlight-color" type="color" value="#ffff00"></label><label>Posição<select id="caption-position"><option value="bottom">Inferior</option><option value="center">Centro</option><option value="top">Superior</option></select></label><label>Tamanho<input id="caption-size" type="range" min="40" max="90" value="62"><span id="caption-size-value">62</span></label><label class="check"><input id="caption-emphasis" type="checkbox" checked> Destacar palavras fortes automaticamente</label></div><label>Filtro<select id="filter"><option value="none">Original</option><option value="vivid">Vibrante</option><option value="cinematic">Cinematográfico</option><option value="mono">Preto e branco</option></select></label><label>Resolução<select id="resolution"><option value="1080">Full HD · recomendado</option><option value="720">HD · mais rápido</option><option value="2160">4K · processamento lento</option></select></label><p id="quality-warning" class="warning" hidden>4K usa mais processamento.</p><button type="submit">Solicitar exportação</button></form></div></section>
+    <section id="about" class="view limits"><p class="eyebrow">TRANSPARÊNCIA</p><h2>Como funciona</h2><div class="limit-grid"><article><b>Cortes inteligentes</b><p>A IA seleciona histórias completas sem forçar uma quantidade fixa.</p></article><article><b>Arquivo limpo</b><p>O corte original permanece sem legenda queimada para permitir edição posterior.</p></article><article><b>Editor separado</b><p>Legenda, cores, posição e filtro são escolhas de pós-produção.</p></article><article><b>Qualidade</b><p>A exportação preserva o áudio e permite escolher a resolução.</p></article></div></section>
+  </main><div id="toast" role="status" aria-live="polite"></div><script src="app.js"></script>
+</body></html>
