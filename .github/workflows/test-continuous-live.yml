@@ -24,11 +24,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
       - name: Instalar dependências
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg
           python -m pip install -U pip
-          pip install -r requirements.txt
+          pip install -e '.[ai]'
+          pip install 'yt-dlp[default,curl-cffi]'
       - name: Preparar cookies
         run: |
           if [ -n "$YOUTUBE_COOKIES" ]; then
@@ -41,6 +43,8 @@ jobs:
           PYTHONPATH: scripts
           LIVE_URL: ${{ inputs.live_url }}
           TEST_SECONDS: ${{ inputs.test_seconds }}
+          WHISPER_MODEL: small
+          WHISPER_LANGUAGE: pt
         run: |
           set -euo pipefail
           mkdir -p work/continuous-test/stream work/continuous-test/analysis
