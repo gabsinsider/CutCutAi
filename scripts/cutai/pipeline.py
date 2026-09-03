@@ -7,7 +7,7 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .media import audio_metrics, burn_subtitles, duration, make_clip_range, scene_score, thumbnail
+from .media import audio_metrics, duration, make_clip_range, scene_score, thumbnail
 from .metadata import suggest_metadata
 from .models import Clip
 from .proxy import normalize_proxy_url
@@ -137,7 +137,6 @@ def _candidate_score(blocks: list[dict], index: int, start: float, end: float, s
     story = _story_quality(blocks,index,start,end,source_duration)
     text = _range_text(blocks,start,end)
     viral, _, signals = viral_text_score(text)
-    # A história completa continua sendo requisito; entre histórias válidas, potencial viral decide a ordem.
     total = min(100.0, story*.48 + viral*.52)
     return total, {"story": round(story,2), "viral": round(viral,2), **signals}
 
@@ -158,6 +157,14 @@ def choose_top_ranges(segments: list[dict], source_duration: float, limit: int=3
         if len(selected)==limit: break
     return selected
 
+def _caption_track(segments: list[dict], start: float, end: float) -> list[dict]:
+    track=[]
+    for segment in segments:
+        ss=float(segment.get("start",0)); se=float(segment.get("end",0))
+        if se <= start or ss >= end: continue
+        track.append({"start":round(max(0.0,ss-start),3),"end":round(min(end-start,se-start),3),"text":str(segment.get("text","")).strip()})
+    return track
+
 def process(url: str, workdir: Path, capture_seconds: int=DEFAULT_CAPTURE_SECONDS) -> list[Clip]:
     validate_source_url(url); workdir.mkdir(parents=True,exist_ok=True); source=workdir/"capture.mkv"
     source_title=download(url,source,max(60,min(capture_seconds,900))); source_duration=duration(source)
@@ -165,13 +172,12 @@ def process(url: str, workdir: Path, capture_seconds: int=DEFAULT_CAPTURE_SECOND
     _,segments=transcribe(source); ranges=choose_top_ranges(segments,source_duration,3); clips=[]
     if not ranges: raise RuntimeError("Nenhuma história autocontida com final natural foi encontrada. O sistema recusou cortar um assunto claramente em andamento.")
     for rank,(context_score,start,end,signals) in enumerate(ranges,1):
-        clip_id=hashlib.sha1(f"{url}:{datetime.now(UTC).isoformat()}:{rank}".encode()).hexdigest()[:12]; raw=workdir/f"{clip_id}.raw.mp4"; clip_path=workdir/f"{clip_id}.mp4"; thumb=workdir/f"{clip_id}.jpg"
-        make_clip_range(source,raw,start,end); local=[]
-        for s in segments:
-            ss=float(s.get("start",0)); se=float(s.get("end",0))
-            if se>start and ss<end: local.append({"start":max(0.0,ss-start),"end":min(end-start,se-start),"text":str(s.get("text",""))})
-        burn_subtitles(raw,clip_path,local); raw.unlink(missing_ok=True); thumbnail(clip_path,thumb); transcript=" ".join(s["text"] for s in local).strip(); mean,peak=audio_metrics(clip_path); a_score,a_reasons=audio_score(mean,peak); t_score,t_reasons=transcript_score(transcript); s_score=scene_score(clip_path); base=combine_scores(a_score,t_score,s_score); base.total=round(min(100.0,base.total*.50+context_score*.50),2); description,hashtags=suggest_metadata(transcript)
-        reasons=a_reasons+t_reasons+[f"história/viral {context_score:.0f}/100",f"gancho {signals['hook']:.0f}/100",f"emoção {signals['emotion']:.0f}/100",f"surpresa {signals['surprise']:.0f}/100",f"tensão {signals['conflict']:.0f}/100",f"entrega {signals['payoff']:.0f}/100",f"cena {s_score:.0f}/100",f"duração {end-start:.1f}s","final natural confirmado","legendado"]
+        clip_id=hashlib.sha1(f"{url}:{datetime.now(UTC).isoformat()}:{rank}".encode()).hexdigest()[:12]; clip_path=workdir/f"{clip_id}.mp4"; thumb=workdir/f"{clip_id}.jpg"; captions_path=workdir/f"{clip_id}.captions.json"
+        make_clip_range(source,clip_path,start,end)
+        local=_caption_track(segments,start,end)
+        captions_path.write_text(json.dumps({"version":1,"clip_id":clip_id,"language":"pt","segments":local,"default_style":{"enabled":False}},ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+        thumbnail(clip_path,thumb); transcript=" ".join(s["text"] for s in local).strip(); mean,peak=audio_metrics(clip_path); a_score,a_reasons=audio_score(mean,peak); t_score,t_reasons=transcript_score(transcript); s_score=scene_score(clip_path); base=combine_scores(a_score,t_score,s_score); base.total=round(min(100.0,base.total*.50+context_score*.50),2); description,hashtags=suggest_metadata(transcript)
+        reasons=a_reasons+t_reasons+[f"história/viral {context_score:.0f}/100",f"gancho {signals['hook']:.0f}/100",f"emoção {signals['emotion']:.0f}/100",f"surpresa {signals['surprise']:.0f}/100",f"tensão {signals['conflict']:.0f}/100",f"entrega {signals['payoff']:.0f}/100",f"cena {s_score:.0f}/100",f"duração {end-start:.1f}s","final natural confirmado","legendas disponíveis para edição"]
         breakdown={"audio":round(a_score,2),"transcript":round(t_score,2),"scene":round(s_score,2),"context":round(context_score,2),**{k:round(v,2) for k,v in signals.items()}}
         clip=Clip(id=clip_id,title=source_title,source_title=source_title,score=base,score_breakdown=breakdown,duration=round(end-start,2),source_url=url,asset_url="",thumbnail_url="",transcript=transcript,reasons=reasons,description=description,hashtags=hashtags,created_at=datetime.now(UTC).isoformat()); upsert_clip(RANKING_PATH,clip); clips.append(clip)
     clips.sort(key=lambda c:c.score.total,reverse=True); return clips[:3]
