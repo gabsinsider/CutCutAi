@@ -59,10 +59,11 @@ def viral_text_score(text: str) -> tuple[float, list[str], dict[str, float]]:
     body_strength = (development + emotion + surprise + conflict + clarity) / 5
     ending_strength = payoff
     weakest_phase = min(opening_strength, body_strength, ending_strength)
-    story_arc = clamp(opening_strength*.32 + body_strength*.38 + ending_strength*.30 + weakest_phase*.15)
 
-    # Viralidade forte exige equilíbrio: um ótimo gancho não deve esconder um corpo fraco,
-    # e emoção sem entrega final também não deve dominar o ranking.
+    # O arco precisa refletir o vídeo inteiro sem inflar artificialmente a nota.
+    # Os pesos somam 1.0 e a fase mais fraca continua tendo influência explícita.
+    story_arc = clamp(opening_strength*.28 + body_strength*.33 + ending_strength*.26 + weakest_phase*.13)
+
     raw_viral = hook*.15 + retention*.18 + emotion*.12 + surprise*.11 + conflict*.09 + payoff*.14 + clarity*.07 + story_arc*.14
     balance_penalty = max(0.0, 42.0-weakest_phase) * .22
     viral_strength = clamp(raw_viral-balance_penalty)
