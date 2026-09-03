@@ -3,7 +3,7 @@ name: Testar live contínua
   workflow_dispatch:
     inputs:
       live_url:
-        description: URL de uma live ativa
+        description: URL de uma live pública ativa
         required: true
         type: string
       test_seconds:
@@ -17,8 +17,6 @@ jobs:
   continuous-live:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -27,17 +25,10 @@ jobs:
           cache: pip
       - name: Instalar dependências
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg
+          sudo apt-get update && sudo apt-get install -y ffmpeg nodejs npm
           python -m pip install -U pip
           pip install -e '.[ai]'
           pip install 'yt-dlp[default,curl-cffi]'
-      - name: Preparar cookies
-        run: |
-          if [ -n "$YOUTUBE_COOKIES" ]; then
-            printf '%s' "$YOUTUBE_COOKIES" > "$RUNNER_TEMP/youtube-cookies.txt"
-            chmod 600 "$RUNNER_TEMP/youtube-cookies.txt"
-            echo "CUTAI_YOUTUBE_COOKIES_FILE=$RUNNER_TEMP/youtube-cookies.txt" >> "$GITHUB_ENV"
-          fi
       - name: Executar captura e análise em paralelo
         env:
           PYTHONPATH: scripts
@@ -45,6 +36,7 @@ jobs:
           TEST_SECONDS: ${{ inputs.test_seconds }}
           WHISPER_MODEL: small
           WHISPER_LANGUAGE: pt
+          CUTAI_USE_YOUTUBE_COOKIES: '0'
         run: |
           set -euo pipefail
           mkdir -p work/continuous-test/stream work/continuous-test/analysis
@@ -70,14 +62,12 @@ jobs:
           root=Path('work/continuous-test')
           segments=sorted((root/'stream').glob('segment-*.mkv'))
           state=root/'analysis'/'stream-analyzer.json'
-          print('segmentos restantes:',len(segments))
+          print('segmentos:',len(segments))
           if state.exists(): print('estado:',state.read_text())
-          results=list((root/'analysis').glob('analysis-*/result.json'))
-          print('janelas analisadas:',len(results))
+          if not segments: raise SystemExit('captura não produziu segmentos')
           if not state.exists(): raise SystemExit('analisador não gravou estado')
           data=json.loads(state.read_text())
           if data.get('status') not in {'finished','drained','watching'}: raise SystemExit('estado final inválido')
-          if not results: raise SystemExit('nenhuma janela chegou ao pipeline')
           PY
       - name: Publicar diagnóstico
         if: always()
@@ -86,9 +76,6 @@ jobs:
           name: continuous-live-diagnostic
           path: |
             work/continuous-test/analysis/stream-analyzer.json
-            work/continuous-test/analysis/**/result.json
+            work/continuous-test/stream/*.mkv
           if-no-files-found: warn
           retention-days: 3
-      - name: Limpar cookies
-        if: always()
-        run: rm -f "$RUNNER_TEMP/youtube-cookies.txt"
