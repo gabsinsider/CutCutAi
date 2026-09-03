@@ -1,0 +1,28 @@
+services:
+  cutcutai-worker:
+    build: .
+    restart: unless-stopped
+    init: true
+    environment:
+      CUTAI_YOUTUBE_COOKIES_FILE: ${CUTAI_YOUTUBE_COOKIES_FILE:-}
+      CUTAI_PROXY: ${CUTAI_PROXY:-}
+      CUTAI_USER_AGENT: ${CUTAI_USER_AGENT:-}
+    volumes:
+      - cutcutai-data:/data/cutcutai
+      - ${CUTAI_COOKIES_HOST_PATH:-./runtime/cookies.txt}:/run/secrets/youtube-cookies.txt:ro
+    command:
+      - --url
+      - ${CUTAI_LIVE_URL:?Defina CUTAI_LIVE_URL}
+      - --root
+      - /data/cutcutai/continuous-live
+      - --segment-seconds
+      - "30"
+      - --window-seconds
+      - "600"
+      - --overlap-seconds
+      - "90"
+      - --capture-restarts
+      - "12"
+
+volumes:
+  cutcutai-data:
