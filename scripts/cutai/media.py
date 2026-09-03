@@ -3,6 +3,9 @@ import subprocess
 from pathlib import Path
 
 
+EMPHASIS_TERMS = {"absurdo", "atenção", "bomba", "caramba", "golaço", "gol", "histórico", "impressionante", "inacreditável", "incrível", "loucura", "melhor", "ninguém", "polêmica", "problema", "segredo", "sensacional", "surpreendente", "urgente", "verdade"}
+
+
 def run(command: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, check=True, text=True, capture_output=True)
 
@@ -52,8 +55,13 @@ def _caption_chunks(text: str, max_words: int = 5) -> list[str]:
     return [" ".join(words[i:i+max_words]) for i in range(0,len(words),max_words)]
 
 
+def _is_emphasis(text: str) -> bool:
+    words={word.lower().strip(".,!?;:") for word in text.split()}
+    return bool(words & EMPHASIS_TERMS) or "!" in text
+
+
 def burn_subtitles(source: Path, output: Path, segments: list[dict]) -> None:
-    """Burn short social captions. The opening gets stronger typography without changing A/V timing."""
+    """Burn short social captions while preserving the approved A/V timeline."""
     if not segments:
         if source != output: run(["ffmpeg","-y","-i",str(source),"-map","0","-c","copy","-movflags","+faststart",str(output)])
         return
@@ -70,6 +78,7 @@ WrapStyle: 2
 Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
 Style: Default,Arial,62,&H00FFFFFF,&H0000FFFF,&H00101010,&H78000000,-1,0,0,0,100,100,0,0,1,4,1,2,150,150,92,1
 Style: Hook,Arial,72,&H00FFFFFF,&H0000FFFF,&H00000000,&H8A000000,-1,0,0,0,100,100,0,0,1,5,2,2,140,140,105,1
+Style: Emphasis,Arial,70,&H0000FFFF,&H00FFFFFF,&H00000000,&H8A000000,-1,0,0,0,104,104,0,0,1,5,2,2,140,140,100,1
 
 [Events]
 Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
@@ -82,7 +91,9 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
         span=max(.35,end-start); chunk_span=span/len(chunks)
         for idx,chunk in enumerate(chunks):
             cs=start+idx*chunk_span; ce=end if idx==len(chunks)-1 else min(end,cs+chunk_span)
-            style="Hook" if cs < 8.0 else "Default"
+            if cs < 8.0: style="Hook"
+            elif _is_emphasis(chunk): style="Emphasis"
+            else: style="Default"
             safe=_ass_text(chunk)
             if safe: events.append(f"Dialogue: 0,{_ass_time(cs)},{_ass_time(ce)},{style},,0,0,0,,{safe}")
     ass_path.write_text(header+"\n".join(events)+"\n",encoding="utf-8")
