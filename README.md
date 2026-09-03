@@ -1,18 +1,20 @@
 # CutCutAi
 
-Ferramenta open source para capturar transmissões em segmentos, transcrever o áudio, estimar o potencial de cada momento e produzir cortes curtos classificados por score. A interface é publicada no GitHub Pages; processamento e exportações acontecem no GitHub Actions; vídeos ficam em GitHub Releases.
+Ferramenta open source para capturar transmissões em segmentos, transcrever o áudio, estimar o potencial de cada momento e produzir cortes classificados por score. A interface é publicada no GitHub Pages; processamento e exportações acontecem no GitHub Actions; vídeos ficam em GitHub Releases.
 
 > **MVP:** esta versão prova o fluxo completo com uma captura de 1–15 minutos por execução. Acompanhamento recorrente de uma live longa exige novas execuções e consome a cota do Actions.
 
 ## Como funciona
 
-1. Na interface, cole o link da live e abra a Issue preparada.
-2. A Issue recebe o label `live-request` e inicia `process-live.yml`.
+1. Na interface, cole o link da live e abra a solicitação preparada.
+2. O pedido inicia `process-live.yml`.
 3. `yt-dlp` captura um segmento; `faster-whisper` transcreve em CPU.
-4. O score combina fala (45%), energia do áudio (35%) e mudanças de cena (20%).
-5. FFmpeg produz um corte de aproximadamente 60 segundos e uma miniatura.
-6. Os arquivos são anexados a um Release e `data/ranking.json` é atualizado.
-7. O GitHub Pages publica o novo ranking automaticamente.
+4. A análise procura histórias completas e pontua os candidatos.
+5. FFmpeg produz cortes limpos com no mínimo 60 segundos; a quantidade não é forçada quando não há candidatos bons suficientes.
+6. Cada corte é publicado com MP4, miniatura e uma trilha `.captions.json` editável.
+7. `data/ranking.json` é atualizado e o GitHub Pages publica o ranking.
+8. No Editor, o usuário escolhe legenda, cores, destaque, posição, tamanho, filtro e resolução.
+9. A exportação renderiza um novo MP4 em um Release independente. O corte original permanece inalterado.
 
 ## Ativação inicial
 
@@ -32,13 +34,15 @@ Runners públicos do GitHub usam IPs de datacenter e podem receber bloqueios ant
 - nome: `CUTAI_PROXY_URL`
 - valor: URL completa entregue pelo provedor, no formato `http://usuario:senha@host:porta`
 
-O segredo é injetado somente durante a captura, não aparece no repositório e é removido de mensagens de erro. Use sessão fixa (*sticky session*) durante cada captura para evitar troca de IP no meio da live. O custo é por tráfego; limite resolução e duração para controlar gastos.
+O segredo é injetado somente durante a captura. Use sessão fixa (*sticky session*) durante cada captura para evitar troca de IP no meio da live. O custo é por tráfego; limite resolução e duração para controlar gastos.
+
+Para YouTube, o projeto também aceita a sessão protegida configurada no secret `YOUTUBE_COOKIES`.
 
 ## Uso
 
 ### Pela interface
 
-Acesse o endereço publicado no GitHub Pages, cole um link e finalize a criação da Issue. O progresso aparece na aba **Actions** e o resultado entra no ranking ao terminar.
+Acesse o endereço publicado no GitHub Pages, cole um link e finalize a solicitação no GitHub. O resultado entra no ranking ao terminar.
 
 ### Manualmente pelo Actions
 
@@ -46,21 +50,24 @@ Abra **Actions → Processar live → Run workflow**, informe a URL e o tamanho 
 
 ### Edição
 
-Escolha um corte no Editor. A interface prepara uma Issue `edit-request`; o workflow baixa o asset do Release, aplica o filtro e a resolução escolhidos e envia a nova versão ao mesmo Release. A base atual já renderiza filtros e até 4K. Legendas animadas e narração TTS estão representadas na interface, mas serão conectadas ao renderizador na próxima etapa do produto.
+Escolha um corte no Editor. A interface carrega a trilha real de legendas sincronizada com o vídeo e permite configurar estilo (`viral`, `clean` ou sem legenda), cor, destaque automático, posição, tamanho, filtro e resolução. A solicitação inicia `edit-clip.yml`, que baixa o corte limpo e a trilha de legendas, renderiza a edição e publica o vídeo final em um **novo Release independente**.
+
+O Release original do corte não é alterado pela exportação.
 
 ## Limitações reais
 
+- **Ainda existe uma etapa visível no GitHub.** O Pages é uma interface estática; nesta arquitetura MVP, pedidos de processamento e exportação ainda são enviados por Issues. Um backend autenticado é o caminho para remover essa etapa para usuários finais.
 - **Não é tempo real literal.** A alternativa dentro do GitHub é capturar e processar janelas. Cada nova janela exige uma execução.
 - **GitHub Actions não é infraestrutura gratuita ilimitada.** Repositórios privados usam a cota de minutos do plano. Jobs hospedados têm duração máxima e podem aguardar em fila.
-- **IA em CPU é mais lenta e menos precisa.** O padrão é Whisper `tiny` com quantização `int8`. Modelos maiores melhoram a transcrição, mas aumentam bastante o tempo.
-- **4K é pesado.** O runner padrão não tem GPU; o encoder x264 usa CPU. A interface avisa antes da solicitação.
+- **IA em CPU é mais lenta que workers com GPU.** O pipeline atual prioriza funcionamento dentro do GitHub Actions.
+- **4K pode ser upscale.** Quando a fonte é 1080p, selecionar 2160p aumenta a resolução de saída, mas não cria detalhe nativo que não existe na fonte.
 - **Fontes podem bloquear downloads.** Lives privadas, DRM, login, geobloqueio e mudanças nas plataformas podem impedir o `yt-dlp`.
-- **Proxy pode ser necessário.** YouTube e TikTok bloqueiam com frequência IPs de datacenter. Proxy residencial gera cobrança por GB e também não elimina DRM ou exigências de conta.
-- **Armazenamento não é infinito.** MP4 e miniaturas ficam em Releases, nunca em commits. Ainda se aplicam políticas e cotas do GitHub.
-- **Score não garante viralização.** Ele ordena sinais observáveis e precisa ser calibrado com feedback e dados reais.
+- **Proxy pode ser necessário.** YouTube e TikTok bloqueiam com frequência IPs de datacenter. Proxy residencial gera cobrança por GB e não elimina DRM ou exigências de conta.
+- **Armazenamento não é infinito.** MP4, miniaturas e metadados publicados em Releases continuam sujeitos às políticas e cotas do GitHub.
+- **Score não garante viralização.** Ele ordena sinais observáveis e deve continuar sendo calibrado com feedback e dados reais.
 - **Direitos autorais e privacidade.** Processe apenas transmissões que você tem autorização para baixar e reutilizar.
 
-Consulte [docs/arquitetura.md](docs/arquitetura.md) para detalhes e [docs/roadmap.md](docs/roadmap.md) para a evolução planejada.
+Consulte `docs/arquitetura.md` e `docs/roadmap.md` para detalhes internos.
 
 ## Desenvolvimento local
 
@@ -75,10 +82,10 @@ Para executar o pipeline completo, instale FFmpeg, `yt-dlp` e o extra `ai`:
 
 ```bash
 pip install -e '.[ai]'
-pip install yt-dlp
-python -m cutai.pipeline --url 'LINK_DA_LIVE' --capture-seconds 180
+pip install 'yt-dlp[default,curl-cffi]'
+python -m cutai.pipeline --url 'LINK_DA_LIVE' --capture-seconds 300
 ```
 
 ## Evolução para produção
 
-Para escala, mova o processamento longo para workers com GPU e object storage. APIs como Whisper e um LLM podem elevar a qualidade da transcrição, dos títulos e da análise contextual. O Pages pode continuar como vitrine, mas um backend autenticado deve substituir Issues quando houver vários usuários.
+O fluxo atual foi desenhado para validar o produto usando GitHub Pages + Actions + Releases. Para transformar a interface em uma experiência transparente para clientes, a próxima camada deve ser um backend autenticado que receba os pedidos do site, acompanhe o estado dos jobs e devolva os resultados sem expor Issues ou Actions. Para maior escala, o processamento longo pode migrar para workers com GPU e object storage mantendo a mesma separação entre **corte original limpo** e **exportações editadas**.
