@@ -1,9 +1,7 @@
 """Captura contínua de lives com autenticação opcional.
 
-Para YouTube público, o caminho padrão é anônimo: yt-dlp usa clientes adequados
-para live/HLS e, quando instalado, um PO Token Provider automático. Cookies de
-conta ficam apenas como fallback explícito para conteúdo que realmente exige
-login (privado, membros, restrição de idade etc.).
+Para YouTube público, o caminho padrão é anônimo. Cookies de conta ficam apenas
+como fallback explícito para conteúdo que realmente exige login.
 """
 from __future__ import annotations
 
@@ -23,9 +21,9 @@ def build_command(url: str, output_dir: Path, segment_seconds: int) -> list[str]
     pattern = output_dir / "segment-%08d.mkv"
     command = [
         "yt-dlp", "--no-playlist", "--no-progress", "--no-simulate",
-        "--impersonate", "chrome", "--extractor-retries", "5",
+        "--extractor-retries", "5",
         "--fragment-retries", "10", "--retry-sleep", "extractor:2",
-        "--js-runtimes", "node", "-f",
+        "-f",
         "bestvideo[height<=1080][fps<=30]+bestaudio/best[height<=1080][fps<=30]/best",
         "--downloader", "ffmpeg",
         "--downloader-args",
@@ -33,8 +31,6 @@ def build_command(url: str, output_dir: Path, segment_seconds: int) -> list[str]
         "-o", str(pattern),
     ]
 
-    # Conta/cookies não fazem parte do caminho normal. Só habilitamos quando o
-    # operador pede explicitamente, para fontes que realmente exigem login.
     cookie_file = os.getenv("CUTAI_YOUTUBE_COOKIES_FILE", "").strip()
     use_cookies = os.getenv("CUTAI_USE_YOUTUBE_COOKIES", "").strip().lower() in {"1", "true", "yes"}
     user_agent = os.getenv("CUTAI_YOUTUBE_USER_AGENT", "").strip()
@@ -46,8 +42,6 @@ def build_command(url: str, output_dir: Path, segment_seconds: int) -> list[str]
     if proxy_url:
         command += ["--proxy", proxy_url]
 
-    # HLS de lives (exceto cliente iOS) não exige GVS PO Token atualmente. O
-    # mweb fica disponível para o provider automático quando necessário.
     command += [
         "--extractor-args",
         "youtube:player_client=web_safari,mweb;formats=missing_pot",
