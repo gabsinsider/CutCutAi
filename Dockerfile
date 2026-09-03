@@ -17,6 +17,5 @@ RUN pip install --upgrade pip \
     && pip install "yt-dlp>=2025.1.1"
 
 RUN mkdir -p /data/cutcutai
-VOLUME ["/data/cutcutai"]
 
 CMD ["python", "-m", "cutai.worker_api"]
