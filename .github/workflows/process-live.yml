@@ -62,7 +62,7 @@ jobs:
             [ -z "$CLIP_ID" ] && continue; rank=$((rank+1)); TAG="clip-$CLIP_ID"
             gh release create "$TAG" "work/$CLIP_ID.mp4" "work/$CLIP_ID.jpg" "work/$CLIP_ID.captions.json" --title "CutCutAi · Top $rank · $CLIP_ID" --notes "Corte limpo e trilha de legendas editável gerados automaticamente pelo CutCutAi."
             BASE="https://github.com/${{ github.repository }}/releases/download/$TAG"
-            python scripts/update_release_metadata.py --ranking data/ranking.json --clip "$CLIP_ID" --asset-url "$BASE/$CLIP_ID.mp4" --thumbnail-url "$BASE/$CLIP_ID.jpg" --tag "$TAG"
+            python scripts/update_release_metadata.py --ranking data/ranking.json --clip "$CLIP_ID" --asset-url "$BASE/$CLIP_ID.mp4" --thumbnail-url "$BASE/$CLIP_ID.jpg" --captions-url "$BASE/$CLIP_ID.captions.json" --tag "$TAG"
           done
       - name: Atualizar ranking
         run: |
