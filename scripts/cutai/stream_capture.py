@@ -19,16 +19,16 @@ from .validation import validate_source_url
 def build_command(url: str, output_dir: Path, segment_seconds: int) -> list[str]:
     output_dir.mkdir(parents=True, exist_ok=True)
     pattern = output_dir / "segment-%08d.mkv"
-    command = [
-        "yt-dlp", "--no-playlist", "--no-progress", "--no-simulate",
-        "--extractor-retries", "5",
-        "--fragment-retries", "10", "--retry-sleep", "extractor:2",
-        "-f",
-        "bestvideo[height<=1080][fps<=30]+bestaudio/best[height<=1080][fps<=30]/best",
-        "--downloader", "ffmpeg",
-        "--downloader-args",
-        f"ffmpeg_o:-c copy -f segment -segment_time {segment_seconds} -reset_timestamps 1",
-        "-o", str(pattern),
+
+    # Deixe o yt-dlp resolver a URL da mídia e entregue o fluxo ao ffmpeg.
+    # A segmentação pertence ao ffmpeg; usar o template segment-%d diretamente
+    # como saída do yt-dlp faz o downloader acrescentar `.part` e quebra o muxer.
+    resolver = [
+        "yt-dlp", "--no-playlist", "--no-progress",
+        "--extractor-retries", "5", "--fragment-retries", "10",
+        "--retry-sleep", "extractor:2",
+        "-f", "best[height<=1080][fps<=30]/best",
+        "-g",
     ]
 
     cookie_file = os.getenv("CUTAI_YOUTUBE_COOKIES_FILE", "").strip()
@@ -36,18 +36,21 @@ def build_command(url: str, output_dir: Path, segment_seconds: int) -> list[str]
     user_agent = os.getenv("CUTAI_YOUTUBE_USER_AGENT", "").strip()
     proxy_url = normalize_proxy_url(os.getenv("CUTAI_PROXY_URL", ""))
     if use_cookies and cookie_file and Path(cookie_file).exists():
-        command += ["--cookies", cookie_file]
+        resolver += ["--cookies", cookie_file]
     if user_agent:
-        command += ["--user-agent", user_agent]
+        resolver += ["--user-agent", user_agent]
     if proxy_url:
-        command += ["--proxy", proxy_url]
+        resolver += ["--proxy", proxy_url]
+    resolver += ["--extractor-args", "youtube:player_client=web_safari,mweb;formats=missing_pot", url]
 
-    command += [
-        "--extractor-args",
-        "youtube:player_client=web_safari,mweb;formats=missing_pot",
-        url,
+    media_url = subprocess.check_output(resolver, text=True).strip().splitlines()[0]
+    return [
+        "ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "warning",
+        "-i", media_url,
+        "-map", "0:v?", "-map", "0:a?", "-c", "copy",
+        "-f", "segment", "-segment_time", str(segment_seconds),
+        "-reset_timestamps", "1", str(pattern),
     ]
-    return command
 
 
 def capture(url: str, output_dir: Path, segment_seconds: int = 30) -> int:
