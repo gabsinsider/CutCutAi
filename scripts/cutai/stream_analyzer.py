@@ -1,21 +1,18 @@
 """Consumidor resiliente do buffer contínuo com limpeza e deduplicação."""
 from __future__ import annotations
-import argparse,json,os,re,shutil,subprocess,time
+import argparse,json,os,re,subprocess,time
 from pathlib import Path
 from .pipeline import process_source
 from .stream_capture import ready_segments,segment_number
 
 def _log(m):print(f"[stream-analyzer] {m}",flush=True)
-def _disk_free(path):
-    try:return shutil.disk_usage(path).free
-    except OSError:return 0
 def _concat(segments,output):
-    output.parent.mkdir(parents=True,exist_ok=True);manifest=output.with_suffix(".txt");manifest.write_text("".join(f"file '{p.resolve().as_posix()}'\n" for p in segments),encoding="utf-8")
-    # A janela é temporária e pode ser grande. Falhamos cedo se o volume não tiver
-    # espaço em vez de deixar arquivos MKV corrompidos aparecerem no pipeline.
-    required=sum(p.stat().st_size for p in segments)+256*1024*1024
-    if _disk_free(output.parent)<required:manifest.unlink(missing_ok=True);raise RuntimeError("Espaço insuficiente para montar janela contínua")
-    r=subprocess.run(["ffmpeg","-hide_banner","-loglevel","error","-y","-f","concat","-safe","0","-i",str(manifest),"-c","copy",str(output)]);manifest.unlink(missing_ok=True)
+    """Monta a janela fora do volume persistente quando possível.
+
+    CUTAI_WINDOW_ROOT deve apontar para o filesystem efêmero do container (/tmp).
+    Assim os segmentos persistentes não são duplicados no volume durante a análise.
+    """
+    output.parent.mkdir(parents=True,exist_ok=True);manifest=output.with_suffix(".txt");manifest.write_text("".join(f"file '{p.resolve().as_posix()}'\n" for p in segments),encoding="utf-8");r=subprocess.run(["ffmpeg","-hide_banner","-loglevel","error","-y","-f","concat","-safe","0","-i",str(manifest),"-c","copy",str(output)]);manifest.unlink(missing_ok=True)
     if r.returncode!=0:output.unlink(missing_ok=True);raise RuntimeError("Falha ao montar janela contínua")
 def _load_cursor(path):
     try:data=json.loads(path.read_text());return max(0,int(data.get("next_segment",data.get("cursor",0))))
@@ -30,15 +27,16 @@ def _cleanup(stream_dir,keep_from):
             try:p.unlink();removed+=1
             except OSError:pass
     if removed:_log(f"buffer limpo: {removed} segmento(s) antigo(s) removido(s)")
-def _cleanup_temp(workdir):
+def _cleanup_temp(root):
     removed=0
-    for p in workdir.glob("window-segment-*.mkv"):
+    if not root.exists():return
+    for p in root.glob("window-segment-*.mkv"):
         try:p.unlink();removed+=1
         except OSError:pass
-    for p in workdir.glob("window-segment-*.txt"):
+    for p in root.glob("window-segment-*.txt"):
         try:p.unlink()
         except OSError:pass
-    if removed:_log(f"recuperação: {removed} janela(s) temporária(s) antiga(s) removida(s)")
+    if removed:_log(f"recuperação: {removed} janela(s) temporária(s) removida(s)")
 def _tokens(text):return {w for w in re.findall(r"[\wÀ-ÿ]+",(text or "").lower()) if len(w)>=4}
 def _similar(a,b):
     aa,bb=_tokens(a),_tokens(b)
@@ -68,15 +66,20 @@ def analyze_once(url,stream_dir,workdir,next_segment,needed,overlap,final=False)
     segments=_available(stream_dir,next_segment);available=len(segments);state=workdir/"stream-analyzer.json";_save(state,next_segment=next_segment,status="waiting" if available<needed else "ready",available_segments=available,needed_segments=needed,final=final)
     take=needed if available>=needed else (available if final and available>=2 else 0)
     if not take:return next_segment,False
-    selected=segments[:take];first,last=selected[0].stem,selected[-1].stem;window=workdir/f"window-{first}-{last}.mkv";analysis_dir=workdir/f"analysis-{first}-{last}";_log(f"montando janela {first}..{last} com {take} segmentos")
+    selected=segments[:take];first,last=selected[0].stem,selected[-1].stem
+    temp_root=Path(os.getenv("CUTAI_WINDOW_ROOT","/tmp/cutcutai-windows"));temp_root.mkdir(parents=True,exist_ok=True);window=temp_root/f"window-{first}-{last}.mkv";analysis_dir=workdir/f"analysis-{first}-{last}";_log(f"montando janela {first}..{last} com {take} segmentos em {temp_root}")
+    success=False
     try:
-        _concat(selected,window);_save(state,next_segment=next_segment,status="analyzing",available_segments=available,needed_segments=needed,first_segment=first,last_segment=last);clips=process_source(window,url,analysis_dir,"Live contínua");clips=_deduplicate(clips,analysis_dir,workdir);_log(f"janela analisada: {len(clips)} corte(s) novo(s) gerado(s)")
+        _concat(selected,window);_save(state,next_segment=next_segment,status="analyzing",available_segments=available,needed_segments=needed,first_segment=first,last_segment=last);clips=process_source(window,url,analysis_dir,"Live contínua");clips=_deduplicate(clips,analysis_dir,workdir);_log(f"janela analisada: {len(clips)} corte(s) novo(s) gerado(s)");success=True
     except Exception as exc:
         _log(f"erro na janela {first}..{last}: {type(exc).__name__}: {exc}");_save(state,next_segment=next_segment,status="analysis_error",error=str(exc),first_segment=first,last_segment=last)
     finally:window.unlink(missing_ok=True)
+    # Só avançamos/apagamos segmentos depois de uma análise concluída. Em falha de
+    # espaço/transcodificação, os dados originais continuam disponíveis para retry.
+    if not success:return next_segment,False
     advance=take if final and take<needed else max(1,take-overlap);new_next=segment_number(selected[advance]) if advance<len(selected) else segment_number(selected[-1])+1;_cleanup(stream_dir,new_next);_save(state,next_segment=new_next,last_segment=last,status="drained" if final else "watching",needed_segments=needed);return new_next,True
 def run(url,stream_dir,workdir,segment_seconds=30,window_seconds=600,overlap_seconds=90,poll_seconds=5,stop_file=None):
-    needed=max(2,window_seconds//segment_seconds);overlap=max(1,overlap_seconds//segment_seconds);workdir.mkdir(parents=True,exist_ok=True);_cleanup_temp(workdir);state=workdir/"stream-analyzer.json";next_segment=_load_cursor(state);last_report=0.0;_log(f"iniciado: precisa de {needed} segmentos, overlap={overlap}, próximo={next_segment}");existing=ready_segments(stream_dir)
+    needed=max(2,window_seconds//segment_seconds);overlap=max(1,overlap_seconds//segment_seconds);workdir.mkdir(parents=True,exist_ok=True);temp_root=Path(os.getenv("CUTAI_WINDOW_ROOT","/tmp/cutcutai-windows"));temp_root.mkdir(parents=True,exist_ok=True);_cleanup_temp(temp_root);state=workdir/"stream-analyzer.json";next_segment=_load_cursor(state);last_report=0.0;_log(f"iniciado: precisa de {needed} segmentos, overlap={overlap}, próximo={next_segment}");existing=ready_segments(stream_dir)
     if existing and next_segment>segment_number(existing[-1])+1:next_segment=segment_number(existing[0])
     while True:
         final=bool(stop_file and stop_file.exists())
