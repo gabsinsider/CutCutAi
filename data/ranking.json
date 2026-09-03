@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-03T00:07:25.507446+00:00",
+  "generated_at": "2026-09-03T00:38:49.844196+00:00",
   "clips": [
     {
       "id": "ccc9bd6a8760",
@@ -2090,6 +2090,65 @@
       ]
     },
     {
+      "id": "ecc612c44fa0",
+      "title": "🔴 Rick and Morty Brasil: Clipes das Temps. 1-3 | Melhores Momentos | Ao Vivo 2026-09-03 00:30",
+      "source_url": "https://www.youtube.com/live/mz__EMYpWPw?is=xadjmdVR_FDqbedl",
+      "source_title": "🔴 Rick and Morty Brasil: Clipes das Temps. 1-3 | Melhores Momentos | Ao Vivo 2026-09-03 00:30",
+      "created_at": "2026-09-03T00:37:51.426781+00:00",
+      "duration": 115.25,
+      "score": {
+        "audio": 55.7,
+        "transcript": 30.96,
+        "scene": 100.0,
+        "total": 52.92,
+        "reasons": []
+      },
+      "score_breakdown": {
+        "audio": 55.7,
+        "transcript": 30.96,
+        "scene": 100.0,
+        "context": 58.88,
+        "story": 89.13,
+        "viral": 30.96,
+        "hook": 48,
+        "retention": 36.06,
+        "emotion": 47,
+        "surprise": 28,
+        "conflict": 8,
+        "payoff": 20,
+        "clarity": 72.57,
+        "story_arc": 34.24,
+        "viral_strength": 30.96
+      },
+      "transcript": "Conseguimos! Valeu a pena total! A gente conseguiu, mandamos ver, né? É, mano! É! Isso se chama oxitocina. Eu extraí de uma ratazana. Você sabe o que é uma ratazana, Mori? Sabe o que é uma ratazana? É um roedor que acasala a vida toda, Mori. Essa é a química liberada no cérebro. É a química liberada no cérebro de um mamífero que faz você se apaixonar. Tá bom, Mori? Eu só vou misturar com um pouco do seu DNA. Ah, tá. Beleza. Um cabelo, Mori. Eu preciso de um cabelo. Isso aqui não é a Guerra dos Tronos. Tá bom, Mori? Seja lá em quem você jogar essa coisa, vai se apaixonar por você. E só por você, pra sempre. Tá feliz agora, Mori? Aí sim! Valeu, Mori. Não tem nenhum perigo, o efeito colateral, né? O que tá achando que eu sou um picareta? Vai fundo, Mori! É a prova de idiotas. A menos que ela esteja gripada. Beth, você ainda me ama. Ah, mas que pergunta é essa? Do tipo sim ou não? Jerry, você quer que sentetos tenham casas? Sim. E você vai construí -las? Não. Então do que adiantam sim? Espera aí, minha mar é a casa ou o sentetos? Amar você é trabalho, Jerry. Trabalho duro. Tipo, construir um abrigo pra sentetos. Ninguém quer falar não, mas algumas pessoas põem a mão na massa. Então, o que me diz? Tá me vendo trabalhar aqui? Esse papo tá meio entediante pra mim. Talvez. Então, obviamente, eu meio que amo você, não é mesmo? Então, para de perguntar. Talvez eu te ame um pouco mais merda. Precisam de mim no hospital de cavalos. Ah, tão tarde. O hipódromo teve um pario noturno. Teve uma colisão com sete cavalos. E o David tá lá sozinho. David. David. David. David. David. David. David. Pode crer. Tem que ficar esperto. Espere com uma gripe que tá solta no ar. Vou tomar vacina. Em minha livra da gripe, só no batidão.",
+      "description": "Conseguimos!",
+      "hashtags": [
+        "#viral",
+        "#cortes",
+        "#voce",
+        "#mori",
+        "#david",
+        "#entao",
+        "#ratazana"
+      ],
+      "asset_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-ecc612c44fa0/ecc612c44fa0.mp4",
+      "thumbnail_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-ecc612c44fa0/ecc612c44fa0.jpg",
+      "release_tag": "clip-ecc612c44fa0",
+      "reasons": [
+        "Pico de energia no áudio",
+        "história/viral 59/100",
+        "gancho 48/100",
+        "emoção 47/100",
+        "surpresa 28/100",
+        "tensão 8/100",
+        "entrega 20/100",
+        "cena 100/100",
+        "duração 115.2s",
+        "final natural confirmado",
+        "legendado"
+      ]
+    },
+    {
       "id": "47d482063681",
       "title": "🔴 Rick and Morty Brasil: Clipes das Temps. 1-3 | Melhores Momentos | Ao Vivo 2026-09-02 23:59",
       "source_url": "https://www.youtube.com/live/mz__EMYpWPw?is=xadjmdVR_FDqbedl",
@@ -2144,6 +2203,65 @@
         "entrega 20/100",
         "cena 100/100",
         "duração 95.7s",
+        "final natural confirmado",
+        "legendado"
+      ]
+    },
+    {
+      "id": "011f5159af06",
+      "title": "🔴 Rick and Morty Brasil: Clipes das Temps. 1-3 | Melhores Momentos | Ao Vivo 2026-09-03 00:30",
+      "source_url": "https://www.youtube.com/live/mz__EMYpWPw?is=xadjmdVR_FDqbedl",
+      "source_title": "🔴 Rick and Morty Brasil: Clipes das Temps. 1-3 | Melhores Momentos | Ao Vivo 2026-09-03 00:30",
+      "created_at": "2026-09-03T00:38:49.842932+00:00",
+      "duration": 92.98,
+      "score": {
+        "audio": 60.05,
+        "transcript": 31.69,
+        "scene": 100.0,
+        "total": 51.81,
+        "reasons": []
+      },
+      "score_breakdown": {
+        "audio": 60.05,
+        "transcript": 31.69,
+        "scene": 100.0,
+        "context": 55.33,
+        "story": 80.94,
+        "viral": 31.69,
+        "hook": 48,
+        "retention": 47.0,
+        "emotion": 33,
+        "surprise": 28,
+        "conflict": 8,
+        "payoff": 20,
+        "clarity": 80.01,
+        "story_arc": 33.65,
+        "viral_strength": 31.69
+      },
+      "transcript": "Ai, yo! Yo! A gente que odeia o rapper. Ah, puxa, Mori. Eu sinto muito. Ah, tá. Não foi nada, Brad. Tem algo especial em você, Mori? Muito especial. Opa! Calma aí, Brad. Chega as mãos de cima dele. Sai pra lá. Quero ficar com o meu homem. Chega, Bradley. Não queremos que machuque o braço que lança as boas. Qual é a diretora batida? Eu só quero. Não me abandone, Mori. Nunca. Claro. Quer dizer, claro que não. Você não achou aquilo meio estranho? Isso importa. Só me abraça. Me solta! Eu te amo, Mori! Me solta! Ela vai ficar sozinha com aquele cara a noite inteira. É, pai. Enfiando a mão dentro de cavalos. Não é um cenário muito romântico. Bom, Summer, sempre tem a possibilidade dela ter inventado tudo. Talvez o David esteja enfiando a mão dentro dela. Não, gente. É da minha mãe que você tá falando. Bom, ela é minha filha, Summer. Eu tô acima de você. Ou família não significa nada. Nesse caso, não use esse argumento. Ela não responde minhas mensagens. Cuidado, pai. Se eu me brocha as mulheres. Ah, e isso não é conveniente? Não pro cara que tiver com ela. Ok. Eu vou dar uma saidinha. Comprar um sorvete. E talvez eu dê uma passadinha no hospital. Vou dar apoia à minha esposa. Com a minha confiança. Nossa. Vou, vou. Você é um c****ão. Desculpa, Summer. A sua opinião significa quase nada pra mim. E por que você não tá naquele baile idiota que todo mundo adora? Que se dano. Não quero ficar doente. É tempo de gripe. É mesmo? É.",
+      "description": "Ai, yo!",
+      "hashtags": [
+        "#viral",
+        "#cortes",
+        "#voce",
+        "#mori",
+        "#minha",
+        "#muito",
+        "#nada"
+      ],
+      "asset_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-011f5159af06/011f5159af06.mp4",
+      "thumbnail_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-011f5159af06/011f5159af06.jpg",
+      "release_tag": "clip-011f5159af06",
+      "reasons": [
+        "Pico de energia no áudio",
+        "história/viral 55/100",
+        "gancho 48/100",
+        "emoção 33/100",
+        "surpresa 28/100",
+        "tensão 8/100",
+        "entrega 20/100",
+        "cena 100/100",
+        "duração 93.0s",
         "final natural confirmado",
         "legendado"
       ]
