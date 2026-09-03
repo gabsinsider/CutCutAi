@@ -1,6 +1,6 @@
 """API HTTP persistente que recebe lives, controla sessões e serve os cortes."""
 from __future__ import annotations
-import hashlib,json,mimetypes,os,re,signal,subprocess,sys,threading,time
+import hashlib,json,mimetypes,os,re,signal,subprocess,sys,threading
 from datetime import UTC,datetime
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
@@ -9,26 +9,43 @@ ROOT=Path(os.getenv("CUTAI_DATA_ROOT","/data/cutcutai"));PORT=int(os.getenv("POR
 
 def _session(url):return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")+"-"+hashlib.sha1(url.encode()).hexdigest()[:8]
 def _session_root():return ROOT/"sessions"/str(_session_id) if _session_id else None
+def _read_json(path):
+    try:return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError,ValueError,TypeError):return {}
+def _write_json(path,data):path.parent.mkdir(parents=True,exist_ok=True);path.write_text(json.dumps(data,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
 def _state():
-    running=bool(_process and _process.poll() is None);root=_session_root();detail={}
-    if root:
-        try:detail=json.loads((root/"supervisor.json").read_text(encoding="utf-8"))
-        except (OSError,ValueError):pass
+    running=bool(_process and _process.poll() is None);root=_session_root();detail=_read_json(root/"supervisor.json") if root else {}
     return {"ok":True,"running":running,"url":_current_url if running else None,"session_id":_session_id,"supervisor":detail}
 def _valid_url(v):
     try:p=urlparse(v);return p.scheme in {"http","https"} and bool(p.netloc)
     except ValueError:return False
-def _stop():
+def _launch(url,session_id):
+    global _process,_current_url,_session_id;_session_id=session_id;root=ROOT/"sessions"/session_id;root.mkdir(parents=True,exist_ok=True);_process=subprocess.Popen([sys.executable,"-m","cutai.live_supervisor","--url",url,"--root",str(root),"--segment-seconds","30","--window-seconds","600","--overlap-seconds","90","--capture-restarts","12"]);_current_url=url
+    meta=_read_json(root/"session.json");meta.update({"id":session_id,"url":url,"status":"active","last_started_at":datetime.now(UTC).isoformat(),"resume_count":int(meta.get("resume_count",0))});_write_json(root/"session.json",meta)
+def _stop(mark_stopped=True):
     global _process,_current_url
+    root=_session_root()
     if _process and _process.poll() is None:
         _process.send_signal(signal.SIGTERM)
         try:_process.wait(timeout=30)
         except subprocess.TimeoutExpired:_process.kill();_process.wait()
+    if mark_stopped and root:
+        meta=_read_json(root/"session.json");meta.update({"status":"stopped","stopped_at":datetime.now(UTC).isoformat()});_write_json(root/"session.json",meta)
     _process=None;_current_url=None
 def _start(url):
-    global _process,_current_url,_session_id;_stop();_session_id=_session(url);root=ROOT/"sessions"/_session_id;root.mkdir(parents=True,exist_ok=True)
-    (root/"session.json").write_text(json.dumps({"id":_session_id,"url":url,"started_at":datetime.now(UTC).isoformat()},ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
-    _process=subprocess.Popen([sys.executable,"-m","cutai.live_supervisor","--url",url,"--root",str(root),"--segment-seconds","30","--window-seconds","600","--overlap-seconds","90","--capture-restarts","12"]);_current_url=url
+    _stop();sid=_session(url);root=ROOT/"sessions"/sid;root.mkdir(parents=True,exist_ok=True);_write_json(root/"session.json",{"id":sid,"url":url,"status":"active","started_at":datetime.now(UTC).isoformat(),"resume_count":0});_launch(url,sid)
+def _recover():
+    """Retoma a sessão que estava ativa antes de um restart/deploy do container."""
+    sessions=ROOT/"sessions"
+    if not sessions.exists():return False
+    candidates=[]
+    for root in sessions.iterdir():
+        if not root.is_dir():continue
+        meta=_read_json(root/"session.json")
+        if meta.get("status")!="active" or not _valid_url(str(meta.get("url",""))):continue
+        candidates.append((str(meta.get("last_started_at") or meta.get("started_at") or ""),root,meta))
+    if not candidates:return False
+    _,root,meta=max(candidates,key=lambda x:x[0]);url=str(meta["url"]);meta["resume_count"]=int(meta.get("resume_count",0))+1;meta["resumed_at"]=datetime.now(UTC).isoformat();_write_json(root/"session.json",meta);print(f"[worker-api] retomando sessão {root.name} após reinício",flush=True);_launch(url,root.name);return True
 
 def _analysis_roots():
     roots=[];legacy=ROOT/"continuous-live"/"analysis"
@@ -69,11 +86,9 @@ def _ranking(handler=None):
         if "captions" in found:row["captions_url"]=f"{prefix}/{cid}.captions.json"
         clips.append(row)
     clips.sort(key=lambda c:str(c.get("created_at","")),reverse=True);return {"clips":clips,"count":len(clips)}
-
 class Handler(BaseHTTPRequestHandler):
     def _cors(self):self.send_header("Access-Control-Allow-Origin",os.getenv("CUTAI_ALLOWED_ORIGIN","*"));self.send_header("Access-Control-Allow-Headers","Content-Type, Authorization, Range");self.send_header("Access-Control-Allow-Methods","GET, POST, OPTIONS");self.send_header("Access-Control-Expose-Headers","Content-Length, Content-Range, Accept-Ranges")
-    def _send(self,code,payload):
-        body=json.dumps(payload,ensure_ascii=False).encode();self.send_response(code);self.send_header("Content-Type","application/json; charset=utf-8");self.send_header("Content-Length",str(len(body)));self._cors();self.end_headers();self.wfile.write(body)
+    def _send(self,code,payload):body=json.dumps(payload,ensure_ascii=False).encode();self.send_response(code);self.send_header("Content-Type","application/json; charset=utf-8");self.send_header("Content-Length",str(len(body)));self._cors();self.end_headers();self.wfile.write(body)
     def _send_file(self,path):
         if not path.is_file():self._send(404,{"ok":False,"error":"not_found"});return
         size=path.stat().st_size;start=0;end=size-1;rh=self.headers.get("Range","")
@@ -98,8 +113,7 @@ class Handler(BaseHTTPRequestHandler):
         if p in {"/","/health","/status"}:self._send(200,_state());return
         if p=="/ranking":self._send(200,_ranking(self));return
         if p.startswith("/media/"):
-            filename=Path(unquote(p[7:])).name;cid=filename.split(".",1)[0];found=_clip_files().get(cid,{})
-            path=found.get("captions") if filename.endswith(".captions.json") else found.get("asset") if filename.endswith(".mp4") else found.get("thumbnail") if filename.endswith(".jpg") else None
+            filename=Path(unquote(p[7:])).name;cid=filename.split(".",1)[0];found=_clip_files().get(cid,{});path=found.get("captions") if filename.endswith(".captions.json") else found.get("asset") if filename.endswith(".mp4") else found.get("thumbnail") if filename.endswith(".jpg") else None
             if path:self._send_file(path)
             else:self._send(404,{"ok":False,"error":"not_found"})
             return
@@ -119,10 +133,14 @@ class Handler(BaseHTTPRequestHandler):
         else:self._send(404,{"ok":False,"error":"not_found"})
     def log_message(self,fmt,*args):print(f"[worker-api] {self.address_string()} {fmt % args}",flush=True)
 def main():
-    ROOT.mkdir(parents=True,exist_ok=True);server=ThreadingHTTPServer(("0.0.0.0",PORT),Handler);print(f"CutCutAi worker API ouvindo em 0.0.0.0:{PORT}",flush=True)
+    ROOT.mkdir(parents=True,exist_ok=True)
+    with _lock:_recover()
+    server=ThreadingHTTPServer(("0.0.0.0",PORT),Handler);print(f"CutCutAi worker API ouvindo em 0.0.0.0:{PORT}",flush=True)
     try:server.serve_forever()
     except KeyboardInterrupt:pass
     finally:
-        with _lock:_stop()
+        # Encerramento do container não equivale a pedido do usuário: mantemos a
+        # sessão marcada ativa para que o próximo processo possa retomá-la.
+        with _lock:_stop(mark_stopped=False)
         server.server_close()
 if __name__=="__main__":main()
