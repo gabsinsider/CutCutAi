@@ -23,32 +23,50 @@ def _media_urls(url):
     video_fmt="bestvideo[height<=1080][fps<=30][vcodec^=avc1]/bestvideo[height<=1080][fps<=30]";audio_fmt="bestaudio[acodec^=mp4a]/bestaudio"
     try:return _resolve(url,video_fmt)[0],_resolve(url,audio_fmt)[0],"adaptive"
     except (subprocess.CalledProcessError,IndexError):return _resolve(url,"best[height<=1080][fps<=30]/best")[0],None,"muxed"
-def _input(url):
-    # O CDN do YouTube pode trocar r16 -> rr1 (ou outro host) durante a live.
-    # Desabilitar persistência/múltiplas requisições impede o demuxer HLS de tentar
-    # reaproveitar uma conexão HTTP aberta para um hostname diferente.
-    return ["-thread_queue_size","4096","-http_persistent","0","-http_multiple","0","-reconnect","1","-reconnect_streamed","1","-reconnect_delay_max","5","-i",url]
+def _input(url):return ["-thread_queue_size","4096","-http_persistent","0","-http_multiple","0","-reconnect","1","-reconnect_streamed","1","-reconnect_delay_max","5","-i",url]
+def _remove_incomplete(output_dir):
+    removed=0
+    for p in output_dir.glob("*.part"):
+        try:p.unlink();removed+=1
+        except OSError:pass
+    if removed:print(f"[stream-capture] removidos {removed} segmento(s) incompleto(s)",flush=True)
 def build_command(url,output_dir,segment_seconds):
     output_dir.mkdir(parents=True,exist_ok=True);pattern=output_dir/"segment-%08d.mkv";start=next_segment_number(output_dir);video,audio,mode=_media_urls(url);print(f"[stream-capture] modo={mode}; iniciando no segmento {start:08d}",flush=True)
     cmd=["ffmpeg","-hide_banner","-nostdin","-loglevel","warning"]+_input(video)
     if audio:cmd += _input(audio)+["-map","0:v:0","-map","1:a:0"]
     else:cmd += ["-map","0:v?","-map","0:a?"]
-    cmd += ["-c","copy","-max_interleave_delta","0","-f","segment","-segment_time",str(segment_seconds),"-segment_start_number",str(start),"-reset_timestamps","1",str(pattern)];return cmd
+    # temp_file faz o FFmpeg gravar .part e renomear atomicamente para .mkv apenas
+    # quando o trailer/índices do segmento já foram finalizados.
+    cmd += ["-c","copy","-max_interleave_delta","0","-f","segment","-segment_time",str(segment_seconds),"-segment_start_number",str(start),"-segment_format_options","live=1","-segment_list_flags","+live","-reset_timestamps","1","-strftime","0",str(pattern)+".part"]
+    return cmd
+def _promote_finished(output_dir):
+    # O muxer segment não renomeia arquivos arbitrários; validamos cada .part com
+    # ffprobe e só então o tornamos visível ao analisador como .mkv.
+    for p in sorted(output_dir.glob("segment-*.mkv.part")):
+        try:
+            age=time.time()-p.stat().st_mtime
+            if age<3:continue
+            r=subprocess.run(["ffprobe","-v","error","-show_entries","format=duration","-of","default=nw=1:nk=1",str(p)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=10)
+            if r.returncode==0:p.rename(Path(str(p)[:-5]))
+        except (OSError,subprocess.TimeoutExpired):pass
 def capture(url,output_dir,segment_seconds=30):
     validate_source_url(url)
     if segment_seconds<10 or segment_seconds>120:raise ValueError("segment_seconds deve ficar entre 10 e 120")
-    process=subprocess.Popen(build_command(url,output_dir,segment_seconds));stopping=False
+    _remove_incomplete(output_dir);process=subprocess.Popen(build_command(url,output_dir,segment_seconds));stopping=False
     def stop(*_):
         nonlocal stopping
         if stopping:return
         stopping=True;process.terminate()
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
-    try:return process.wait()
+    try:
+        while process.poll() is None:_promote_finished(output_dir);time.sleep(1)
+        _promote_finished(output_dir);return process.returncode
     finally:
         if process.poll() is None:
             process.terminate()
             try:process.wait(timeout=10)
             except subprocess.TimeoutExpired:process.kill()
+        _remove_incomplete(output_dir)
 def ready_segments(output_dir,settle_seconds=2.0):
     now=time.time();files=sorted(output_dir.glob("segment-*.mkv"),key=segment_number);return [p for p in files if segment_number(p)>=0 and now-p.stat().st_mtime>=settle_seconds]
 def main():
