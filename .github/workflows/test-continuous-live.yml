@@ -1,0 +1,89 @@
+name: Testar live contínua
+'on':
+  workflow_dispatch:
+    inputs:
+      live_url:
+        description: URL de uma live ativa
+        required: true
+        type: string
+      test_seconds:
+        description: Duração do teste em segundos
+        required: false
+        default: '420'
+        type: string
+permissions:
+  contents: read
+jobs:
+  continuous-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Instalar dependências
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          python -m pip install -U pip
+          pip install -r requirements.txt
+      - name: Preparar cookies
+        if: ${{ secrets.YOUTUBE_COOKIES != '' }}
+        env:
+          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+        run: |
+          printf '%s' "$YOUTUBE_COOKIES" > "$RUNNER_TEMP/youtube-cookies.txt"
+          chmod 600 "$RUNNER_TEMP/youtube-cookies.txt"
+          echo "CUTAI_YOUTUBE_COOKIES_FILE=$RUNNER_TEMP/youtube-cookies.txt" >> "$GITHUB_ENV"
+      - name: Executar captura e análise em paralelo
+        env:
+          PYTHONPATH: scripts
+          LIVE_URL: ${{ inputs.live_url }}
+          TEST_SECONDS: ${{ inputs.test_seconds }}
+        run: |
+          set -euo pipefail
+          mkdir -p work/continuous-test/stream work/continuous-test/analysis
+          python -m cutai.stream_capture --url "$LIVE_URL" --output-dir work/continuous-test/stream --segment-seconds 30 &
+          CAPTURE_PID=$!
+          python -m cutai.stream_analyzer --url "$LIVE_URL" --stream-dir work/continuous-test/stream --workdir work/continuous-test/analysis --segment-seconds 30 --window-seconds 180 --overlap-seconds 60 --poll-seconds 3 --stop-file work/continuous-test/capture-ended &
+          ANALYZER_PID=$!
+          sleep "$TEST_SECONDS"
+          kill -TERM "$CAPTURE_PID" 2>/dev/null || true
+          wait "$CAPTURE_PID" || true
+          touch work/continuous-test/capture-ended
+          for i in $(seq 1 90); do
+            kill -0 "$ANALYZER_PID" 2>/dev/null || break
+            sleep 2
+          done
+          kill -TERM "$ANALYZER_PID" 2>/dev/null || true
+          wait "$ANALYZER_PID" || true
+      - name: Validar continuidade
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path('work/continuous-test')
+          segments=sorted((root/'stream').glob('segment-*.mkv'))
+          state=root/'analysis'/'stream-analyzer.json'
+          print('segmentos restantes:',len(segments))
+          if state.exists(): print('estado:',state.read_text())
+          results=list((root/'analysis').glob('analysis-*/result.json'))
+          print('janelas analisadas:',len(results))
+          if not state.exists(): raise SystemExit('analisador não gravou estado')
+          data=json.loads(state.read_text())
+          if data.get('status') not in {'finished','drained','watching'}: raise SystemExit('estado final inválido')
+          if not results: raise SystemExit('nenhuma janela chegou ao pipeline')
+          PY
+      - name: Publicar diagnóstico
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: continuous-live-diagnostic
+          path: |
+            work/continuous-test/analysis/stream-analyzer.json
+            work/continuous-test/analysis/**/result.json
+          if-no-files-found: warn
+          retention-days: 3
+      - name: Limpar cookies
+        if: always()
+        run: rm -f "$RUNNER_TEMP/youtube-cookies.txt"
