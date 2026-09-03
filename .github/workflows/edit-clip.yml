@@ -30,7 +30,15 @@ jobs:
           m=re.search(r'## Corte\s+([a-f0-9]{12})',body,re.I); clip=m.group(1) if m else os.environ.get('INPUT_ID','')
           if not re.fullmatch(r'[a-f0-9]{12}',clip): raise SystemExit('ID inválido')
           values={'clip':clip,'filter':field('Filtro',os.environ.get('INPUT_FILTER','none')),'resolution':field('Resolução',os.environ.get('INPUT_RESOLUTION','1080')),'caption_style':field('Legenda','none'),'caption_color':field('Cor','#FFFFFF'),'highlight_color':field('Destaque','#FFFF00'),'position':field('Posição','bottom'),'size':field('Tamanho','62'),'emphasis':field('Ênfase automática','sim')}
-          values['filter']=values['filter'] if values['filter'] in {'none','vivid','cinematic','mono'} else 'none'; values['resolution']=values['resolution'] if values['resolution'] in {'720','1080','2160'} else '1080'; values['position']=values['position'] if values['position'] in {'top','center','bottom'} else 'bottom'; values['emphasis']='yes' if values['emphasis'].lower() in {'sim','yes','true','1'} else 'no'
+          values['filter']=values['filter'] if values['filter'] in {'none','vivid','cinematic','mono'} else 'none'
+          values['resolution']=values['resolution'] if values['resolution'] in {'720','1080','2160'} else '1080'
+          values['caption_style']=values['caption_style'] if values['caption_style'] in {'none','viral','clean'} else 'none'
+          values['position']=values['position'] if values['position'] in {'top','center','bottom'} else 'bottom'
+          values['emphasis']='yes' if values['emphasis'].lower() in {'sim','yes','true','1'} else 'no'
+          values['caption_color']=values['caption_color'] if re.fullmatch(r'#[0-9a-fA-F]{6}',values['caption_color']) else '#FFFFFF'
+          values['highlight_color']=values['highlight_color'] if re.fullmatch(r'#[0-9a-fA-F]{6}',values['highlight_color']) else '#FFFF00'
+          try: values['size']=str(max(40,min(90,int(values['size']))))
+          except ValueError: values['size']='62'
           with open(os.environ['GITHUB_OUTPUT'],'a') as f:
               for k,v in values.items(): f.write(f'{k}={v}\n')
           PY
@@ -44,7 +52,7 @@ jobs:
         run: >-
           PYTHONPATH=scripts python -m cutai.editor
           --source "work/${{ steps.request.outputs.clip }}.mp4"
-          --output "work/${{ steps.request.outputs.clip }}-edited.mp4"
+          --output "work/${{ steps.request.outputs.clip }}-export-${{ github.run_id }}.mp4"
           --filter "${{ steps.request.outputs.filter }}"
           --resolution "${{ steps.request.outputs.resolution }}"
           --captions "work/${{ steps.request.outputs.clip }}.captions.json"
@@ -54,9 +62,18 @@ jobs:
           --caption-position "${{ steps.request.outputs.position }}"
           --caption-size "${{ steps.request.outputs.size }}"
           --auto-emphasis "${{ steps.request.outputs.emphasis }}"
-      - name: Publicar exportação
+      - name: Publicar exportação independente
+        id: publish
         env: {GH_TOKEN: "${{ github.token }}"}
-        run: gh release upload "clip-${{ steps.request.outputs.clip }}" "work/${{ steps.request.outputs.clip }}-edited.mp4" --clobber
+        run: |
+          CLIP="${{ steps.request.outputs.clip }}"
+          TAG="export-${CLIP}-${{ github.run_id }}"
+          FILE="${CLIP}-export-${{ github.run_id }}.mp4"
+          gh release create "$TAG" "work/$FILE" --title "CutCutAi · Exportação · $CLIP" --notes "Exportação editada a partir do corte limpo $CLIP. O corte original permanece inalterado."
+          URL="https://github.com/${{ github.repository }}/releases/download/$TAG/$FILE"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "file=$FILE" >> "$GITHUB_OUTPUT"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
       - if: github.event_name == 'issues'
-        env: {GH_TOKEN: "${{ github.token }}"}
-        run: gh issue comment "${{ github.event.issue.number }}" --body "Exportação concluída com as escolhas do editor e anexada ao Release do corte."
+        env: {GH_TOKEN: "${{ github.token }}", EXPORT_URL: "${{ steps.publish.outputs.url }}"}
+        run: gh issue comment "${{ github.event.issue.number }}" --body "Exportação concluída. O corte original foi preservado. Vídeo final: $EXPORT_URL"
