@@ -49,7 +49,6 @@ CONTINUATION_ENDINGS = {"e", "mas", "porque", "pois", "que", "quando", "então",
 CONCLUSION_TERMS = {"enfim", "finalmente", "pronto", "acabou", "terminou", "resolveu", "resolvido", "conclusão", "concluindo", "fim", "é isso", "foi isso", "ficou assim"}
 STOPWORDS = {"a","o","as","os","um","uma","de","da","do","das","dos","e","é","em","no","na","nos","nas","que","se","por","para","pra","com","como","mais","muito","já","não","sim","eu","você","vocês","ele","ela","eles","elas","isso","esse","essa","aí","foi","vai","tem","tá","está"}
 
-
 def _words(text: str) -> list[str]: return re.findall(r"[\wÀ-ÿ]+", text.lower())
 def _keywords(text: str) -> set[str]: return {w for w in _words(text) if len(w) >= 4 and w not in STOPWORDS}
 def _looks_complete(text: str) -> bool:
@@ -62,40 +61,25 @@ def _similarity(a: str, b: str) -> float:
     ka, kb = _keywords(a), _keywords(b)
     if not ka or not kb: return 0.0
     return len(ka & kb) / max(1, min(len(ka), len(kb)))
-
 def _make_block(items: list[dict]) -> dict:
     return {"start": float(items[0].get("start", 0)), "end": float(items[-1].get("end", 0)), "segments": list(items), "text": " ".join(str(s.get("text", "")) for s in items).strip()}
-
 def _topic_blocks(segments: list[dict], source_duration: float) -> list[dict]:
     if not segments: return []
     blocks, current = [], []
     for segment in segments:
         if current:
-            gap = float(segment.get("start", 0)) - float(current[-1].get("end", 0))
-            elapsed = float(current[-1].get("end", 0)) - float(current[0].get("start", 0))
-            recent = " ".join(str(s.get("text", "")) for s in current[-5:])
-            incoming = str(segment.get("text", ""))
-            first = set(_words(incoming)[:4])
-            semantic_reset = bool(first & RESET_TERMS) and _similarity(recent, incoming) < .18
-            long_pause_reset = gap >= 2.2 and _similarity(recent, incoming) < .12
-            if (elapsed >= 35.0 and semantic_reset) or long_pause_reset:
-                blocks.append(_make_block(current)); current = []
+            gap = float(segment.get("start", 0)) - float(current[-1].get("end", 0)); elapsed = float(current[-1].get("end", 0)) - float(current[0].get("start", 0)); recent = " ".join(str(s.get("text", "")) for s in current[-5:]); incoming = str(segment.get("text", "")); first = set(_words(incoming)[:4]); semantic_reset = bool(first & RESET_TERMS) and _similarity(recent, incoming) < .18; long_pause_reset = gap >= 2.2 and _similarity(recent, incoming) < .12
+            if (elapsed >= 35.0 and semantic_reset) or long_pause_reset: blocks.append(_make_block(current)); current = []
         current.append(segment)
     if current: blocks.append(_make_block(current))
     return blocks
-
 def _block_score(block: dict) -> float:
-    text = block["text"]; normalized = text.lower(); words = _words(text); duration_s = max(1.0, block["end"] - block["start"])
-    reaction_hits = sum(1 for p in REACTION_PHRASES if p in normalized); story_hits = sum(1 for t in STORY_TERMS if t in words)
+    text = block["text"]; normalized = text.lower(); words = _words(text); duration_s = max(1.0, block["end"] - block["start"]); reaction_hits = sum(1 for p in REACTION_PHRASES if p in normalized); story_hits = sum(1 for t in STORY_TERMS if t in words)
     return min(100.0, min(30.0, len(words)*0.13) + min(25.0, reaction_hits*7 + text.count("!")*2) + min(25.0, story_hits*2.8) + min(15.0, duration_s*0.25) + (5 if _looks_complete(text) else 0))
-
 def _natural_boundary(current: dict, nxt: dict) -> bool:
     if not _looks_complete(current["text"]): return False
-    gap = nxt["start"] - current["end"]
-    cohesion = _similarity(current["text"], nxt["text"])
-    reset = bool(set(_words(nxt["text"])[:5]) & RESET_TERMS)
+    gap = nxt["start"] - current["end"]; cohesion = _similarity(current["text"], nxt["text"]); reset = bool(set(_words(nxt["text"])[:5]) & RESET_TERMS)
     return cohesion < .14 and (reset or gap >= 1.0)
-
 def _context_range(blocks: list[dict], index: int, source_duration: float) -> tuple[float, float]:
     main = blocks[index]; start = main["start"]; end = main["end"]
     if index > 0 and (_starts_as_continuation(main["text"]) or main["start"] < 12.0):
@@ -108,7 +92,6 @@ def _context_range(blocks: list[dict], index: int, source_duration: float) -> tu
         if nxt["end"]-start > MAX_CLIP_SECONDS: return start, end
         end = nxt["end"]; cursor += 1
     return max(0.0,start), min(source_duration,min(end,start+MAX_CLIP_SECONDS))
-
 def _range_has_ending(blocks: list[dict], start: float, end: float, source_duration: float) -> bool:
     if end-start < MIN_CLIP_SECONDS: return False
     included = [b for b in blocks if b["end"] > start and b["start"] < end]
@@ -118,10 +101,7 @@ def _range_has_ending(blocks: list[dict], start: float, end: float, source_durat
     following = next((b for b in blocks if b["start"] >= end-.1), None)
     if following and _natural_boundary(last, following): return True
     return _looks_complete(last["text"]) and source_duration-end >= 20.0 and not _starts_as_continuation(last["text"])
-
-def _range_text(blocks: list[dict], start: float, end: float) -> str:
-    return " ".join(b["text"] for b in blocks if b["end"] > start and b["start"] < end).strip()
-
+def _range_text(blocks: list[dict], start: float, end: float) -> str: return " ".join(b["text"] for b in blocks if b["end"] > start and b["start"] < end).strip()
 def _story_quality(blocks: list[dict], index: int, start: float, end: float, source_duration: float) -> float:
     main=blocks[index]; quality=_block_score(main); first=_words(main["text"])[:8]
     if set(first) & OPENING_TERMS: quality += 10
@@ -132,14 +112,8 @@ def _story_quality(blocks: list[dict], index: int, start: float, end: float, sou
     if source_duration-end < 30.0: quality -= 20
     if start < 10.0: quality -= 20
     return max(0.0,min(100.0,quality))
-
 def _candidate_score(blocks: list[dict], index: int, start: float, end: float, source_duration: float) -> tuple[float, dict[str,float]]:
-    story = _story_quality(blocks,index,start,end,source_duration)
-    text = _range_text(blocks,start,end)
-    viral, _, signals = viral_text_score(text)
-    total = min(100.0, story*.48 + viral*.52)
-    return total, {"story": round(story,2), "viral": round(viral,2), **signals}
-
+    story = _story_quality(blocks,index,start,end,source_duration); text = _range_text(blocks,start,end); viral, _, signals = viral_text_score(text); total = min(100.0, story*.48 + viral*.52); return total, {"story": round(story,2), "viral": round(viral,2), **signals}
 def choose_top_ranges(segments: list[dict], source_duration: float, limit: int=3) -> list[tuple[float,float,float,dict[str,float]]]:
     blocks=_topic_blocks(segments,source_duration)
     if not blocks: return []
@@ -147,8 +121,7 @@ def choose_top_ranges(segments: list[dict], source_duration: float, limit: int=3
     for i in range(len(blocks)):
         start,end=_context_range(blocks,i,source_duration)
         if end-start > MAX_CLIP_SECONDS or not _range_has_ending(blocks,start,end,source_duration): continue
-        score,signals=_candidate_score(blocks,i,start,end,source_duration)
-        candidates.append((score,start,end,signals))
+        score,signals=_candidate_score(blocks,i,start,end,source_duration); candidates.append((score,start,end,signals))
     candidates.sort(key=lambda x:x[0],reverse=True); selected=[]
     for candidate in candidates:
         _,start,end,_=candidate
@@ -156,7 +129,6 @@ def choose_top_ranges(segments: list[dict], source_duration: float, limit: int=3
         selected.append(candidate)
         if len(selected)==limit: break
     return selected
-
 def _caption_track(segments: list[dict], start: float, end: float) -> list[dict]:
     track=[]
     for segment in segments:
@@ -165,23 +137,22 @@ def _caption_track(segments: list[dict], start: float, end: float) -> list[dict]
         track.append({"start":round(max(0.0,ss-start),3),"end":round(min(end-start,se-start),3),"text":str(segment.get("text","")).strip()})
     return track
 
-def process(url: str, workdir: Path, capture_seconds: int=DEFAULT_CAPTURE_SECONDS) -> list[Clip]:
-    validate_source_url(url); workdir.mkdir(parents=True,exist_ok=True); source=workdir/"capture.mkv"
-    source_title=download(url,source,max(60,min(capture_seconds,900))); source_duration=duration(source)
-    if source_duration<MIN_CLIP_SECONDS: raise RuntimeError(f"A plataforma entregou somente {source_duration:.1f}s utilizáveis. São necessários pelo menos 60s para publicar um corte.")
+def process_source(source: Path, source_url: str, workdir: Path, source_title: str="Live") -> list[Clip]:
+    """Analisa um arquivo/buffer já capturado sem abrir uma nova conexão à live."""
+    workdir.mkdir(parents=True,exist_ok=True); source_duration=duration(source)
+    if source_duration<MIN_CLIP_SECONDS: raise RuntimeError(f"A fonte possui somente {source_duration:.1f}s utilizáveis. São necessários pelo menos 60s.")
     _,segments=transcribe(source); ranges=choose_top_ranges(segments,source_duration,3); clips=[]
-    if not ranges: raise RuntimeError("Nenhuma história autocontida com final natural foi encontrada. O sistema recusou cortar um assunto claramente em andamento.")
+    if not ranges: return []
     for rank,(context_score,start,end,signals) in enumerate(ranges,1):
-        clip_id=hashlib.sha1(f"{url}:{datetime.now(UTC).isoformat()}:{rank}".encode()).hexdigest()[:12]; clip_path=workdir/f"{clip_id}.mp4"; thumb=workdir/f"{clip_id}.jpg"; captions_path=workdir/f"{clip_id}.captions.json"
-        make_clip_range(source,clip_path,start,end)
-        local=_caption_track(segments,start,end)
-        captions_path.write_text(json.dumps({"version":1,"clip_id":clip_id,"language":"pt","segments":local,"default_style":{"enabled":False}},ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
-        thumbnail(clip_path,thumb); transcript=" ".join(s["text"] for s in local).strip(); mean,peak=audio_metrics(clip_path); a_score,a_reasons=audio_score(mean,peak); t_score,t_reasons=transcript_score(transcript); s_score=scene_score(clip_path); base=combine_scores(a_score,t_score,s_score); base.total=round(min(100.0,base.total*.50+context_score*.50),2); description,hashtags=suggest_metadata(transcript)
-        reasons=a_reasons+t_reasons+[f"história/viral {context_score:.0f}/100",f"gancho {signals['hook']:.0f}/100",f"emoção {signals['emotion']:.0f}/100",f"surpresa {signals['surprise']:.0f}/100",f"tensão {signals['conflict']:.0f}/100",f"entrega {signals['payoff']:.0f}/100",f"cena {s_score:.0f}/100",f"duração {end-start:.1f}s","final natural confirmado","legendas disponíveis para edição"]
-        breakdown={"audio":round(a_score,2),"transcript":round(t_score,2),"scene":round(s_score,2),"context":round(context_score,2),**{k:round(v,2) for k,v in signals.items()}}
-        clip=Clip(id=clip_id,title=source_title,source_title=source_title,score=base,score_breakdown=breakdown,duration=round(end-start,2),source_url=url,asset_url="",thumbnail_url="",transcript=transcript,reasons=reasons,description=description,hashtags=hashtags,created_at=datetime.now(UTC).isoformat()); upsert_clip(RANKING_PATH,clip); clips.append(clip)
+        fingerprint=f"{source_url}:{source.name}:{round(start,1)}:{round(end,1)}"; clip_id=hashlib.sha1(fingerprint.encode()).hexdigest()[:12]; clip_path=workdir/f"{clip_id}.mp4"; thumb=workdir/f"{clip_id}.jpg"; captions_path=workdir/f"{clip_id}.captions.json"
+        make_clip_range(source,clip_path,start,end); local=_caption_track(segments,start,end); captions_path.write_text(json.dumps({"version":1,"clip_id":clip_id,"language":"pt","segments":local,"default_style":{"enabled":False}},ensure_ascii=False,indent=2)+"\n",encoding="utf-8"); thumbnail(clip_path,thumb); transcript=" ".join(s["text"] for s in local).strip(); mean,peak=audio_metrics(clip_path); a_score,a_reasons=audio_score(mean,peak); t_score,t_reasons=transcript_score(transcript); s_score=scene_score(clip_path); base=combine_scores(a_score,t_score,s_score); base.total=round(min(100.0,base.total*.50+context_score*.50),2); description,hashtags=suggest_metadata(transcript); reasons=a_reasons+t_reasons+[f"história/viral {context_score:.0f}/100",f"gancho {signals['hook']:.0f}/100",f"emoção {signals['emotion']:.0f}/100",f"surpresa {signals['surprise']:.0f}/100",f"tensão {signals['conflict']:.0f}/100",f"entrega {signals['payoff']:.0f}/100",f"cena {s_score:.0f}/100",f"duração {end-start:.1f}s","final natural confirmado","legendas disponíveis para edição"]; breakdown={"audio":round(a_score,2),"transcript":round(t_score,2),"scene":round(s_score,2),"context":round(context_score,2),**{k:round(v,2) for k,v in signals.items()}}; clip=Clip(id=clip_id,title=source_title,source_title=source_title,score=base,score_breakdown=breakdown,duration=round(end-start,2),source_url=source_url,asset_url="",thumbnail_url="",transcript=transcript,reasons=reasons,description=description,hashtags=hashtags,created_at=datetime.now(UTC).isoformat()); upsert_clip(RANKING_PATH,clip); clips.append(clip)
     clips.sort(key=lambda c:c.score.total,reverse=True); return clips[:3]
 
+def process(url: str, workdir: Path, capture_seconds: int=DEFAULT_CAPTURE_SECONDS) -> list[Clip]:
+    validate_source_url(url); workdir.mkdir(parents=True,exist_ok=True); source=workdir/"capture.mkv"; source_title=download(url,source,max(60,min(capture_seconds,900))); clips=process_source(source,url,workdir,source_title)
+    if not clips: raise RuntimeError("Nenhuma história autocontida com final natural foi encontrada. O sistema recusou cortar um assunto claramente em andamento.")
+    return clips
+
 def main()->None:
-    parser=argparse.ArgumentParser(); parser.add_argument("--url",required=True); parser.add_argument("--capture-seconds",type=int,default=DEFAULT_CAPTURE_SECONDS); parser.add_argument("--workdir",default="work"); args=parser.parse_args(); clips=process(args.url,Path(args.workdir),args.capture_seconds); Path(args.workdir,"result.json").write_text(json.dumps({"clips":[c.to_dict() for c in clips]},ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+    parser=argparse.ArgumentParser(); parser.add_argument("--url",required=True); parser.add_argument("--capture-seconds",type=int,default=DEFAULT_CAPTURE_SECONDS); parser.add_argument("--workdir",default="work"); parser.add_argument("--source",type=Path,default=None); parser.add_argument("--source-title",default="Live"); args=parser.parse_args(); clips=process_source(args.source,args.url,Path(args.workdir),args.source_title) if args.source else process(args.url,Path(args.workdir),args.capture_seconds); Path(args.workdir,"result.json").write_text(json.dumps({"clips":[c.to_dict() for c in clips]},ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
 if __name__=="__main__": main()
