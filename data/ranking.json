@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-03T00:38:49.844196+00:00",
+  "generated_at": "2026-09-03T02:20:07.717559+00:00",
   "clips": [
     {
       "id": "ccc9bd6a8760",
@@ -1367,6 +1367,67 @@
         "Linguagem emocional: agora, caramba",
         "Fala com ênfase",
         "Top 1; janela inteligente 109.5s–170.5s (61.0s); núcleo 82.5; legendado"
+      ]
+    },
+    {
+      "id": "0eb6456c0a79",
+      "title": "🔴 Rick and Morty Brasil: Clipes das Temps. 1-3 | Melhores Momentos | Ao Vivo 2026-09-03 02:12",
+      "source_url": "https://www.youtube.com/live/mz__EMYpWPw?is=xadjmdVR_FDqbedl",
+      "source_title": "🔴 Rick and Morty Brasil: Clipes das Temps. 1-3 | Melhores Momentos | Ao Vivo 2026-09-03 02:12",
+      "created_at": "2026-09-03T02:19:33.380679+00:00",
+      "duration": 94.75,
+      "score": {
+        "audio": 56.21,
+        "transcript": 51.03,
+        "scene": 100.0,
+        "total": 65.25,
+        "reasons": []
+      },
+      "score_breakdown": {
+        "audio": 56.21,
+        "transcript": 51.03,
+        "scene": 100.0,
+        "context": 70.61,
+        "story": 91.82,
+        "viral": 51.03,
+        "hook": 79,
+        "retention": 91.81,
+        "emotion": 29,
+        "surprise": 46,
+        "conflict": 44,
+        "payoff": 20,
+        "clarity": 79.1,
+        "story_arc": 47.53,
+        "viral_strength": 51.03
+      },
+      "transcript": "Oi, Mori. Oi, pai. O que você tá fazendo de volta de Plotão tão rápido? É, algumas pessoas não conseguem lidar com a verdade, especialmente idiotas como eu. Mori, eu não sou tão esperto como seu alvo, Rick, mas eu prometo nunca mais jogar esse problema em você. Ei, pai, ninguém é mais esperto que o Rick, só que só você, meu pai, e nisso você é um gênio. Uau, isso é humilde e lisongeiro, filho. Obrigada. O que acha de terminarmos um sistema solar de oito planetas? Eu vou levar isso aqui e tirar um 10. Manteiga. Você é um gênio sendo meu pai, pai. Aproveita enquanto tá no lucro. Só bate na porta da próxima vez, eu tô sentado na cama, tenho 14 e tô com um computador, entendeu? Ah, eu acho que entendi. Você tá brincando com fogo, entrando aqui desse jeito, cara. Já saquei. Não precisa falar mais. Olha só, um dia desses você vai acabar vendo alguma coisa. Eu já entendi. Já registrei. Boa noite. Como vai o seu avô de mentira, também conhecido como o diabo? Ele me deu fora. Oh, que pena. Aprendemos alguma lição que eu não tô enxergando. Não tenho certeza. Será que de alguma forma? O senhor indispensável nos deu o que realmente queríamos? Porque eu tava sempre com os filmes de você saindo por aí com o Mori, e você não percebia o quanto valorizava a minha aprovação? Não, isso é vista. Não, tem nada a ver. Mas eu te digo uma coisa, se essa satisfação que você procura, eu acho que eu tenho uma ideia. Aham, aham. Diabadiuba, diabadiuba. Aham, total, vamos lá.",
+      "description": "Oi, Mori.",
+      "hashtags": [
+        "#viral",
+        "#cortes",
+        "#voce",
+        "#mori",
+        "#isso",
+        "#tenho",
+        "#alguma"
+      ],
+      "asset_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-0eb6456c0a79/0eb6456c0a79.mp4",
+      "thumbnail_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-0eb6456c0a79/0eb6456c0a79.jpg",
+      "release_tag": "clip-0eb6456c0a79",
+      "reasons": [
+        "Pico de energia no áudio",
+        "Gancho forte no início",
+        "Abertura com potencial de retenção",
+        "história/viral 71/100",
+        "gancho 79/100",
+        "emoção 29/100",
+        "surpresa 46/100",
+        "tensão 44/100",
+        "entrega 20/100",
+        "cena 100/100",
+        "duração 94.8s",
+        "final natural confirmado",
+        "legendado"
       ]
     },
     {
@@ -2757,6 +2818,65 @@
         "entrega 20/100",
         "cena 100/100",
         "duração 67.8s",
+        "final natural confirmado",
+        "legendado"
+      ]
+    },
+    {
+      "id": "dfe02170143e",
+      "title": "🔴 Rick and Morty Brasil: Clipes das Temps. 1-3 | Melhores Momentos | Ao Vivo 2026-09-03 02:12",
+      "source_url": "https://www.youtube.com/live/mz__EMYpWPw?is=xadjmdVR_FDqbedl",
+      "source_title": "🔴 Rick and Morty Brasil: Clipes das Temps. 1-3 | Melhores Momentos | Ao Vivo 2026-09-03 02:12",
+      "created_at": "2026-09-03T02:20:07.716300+00:00",
+      "duration": 61.72,
+      "score": {
+        "audio": 58.04,
+        "transcript": 28.37,
+        "scene": 100.0,
+        "total": 40.98,
+        "reasons": []
+      },
+      "score_breakdown": {
+        "audio": 58.04,
+        "transcript": 28.37,
+        "scene": 100.0,
+        "context": 36.2,
+        "story": 44.69,
+        "viral": 28.37,
+        "hook": 52,
+        "retention": 41.62,
+        "emotion": 27,
+        "surprise": 10,
+        "conflict": 8,
+        "payoff": 20,
+        "clarity": 79.72,
+        "story_arc": 31.99,
+        "viral_strength": 28.37
+      },
+      "transcript": "Branco, branco é opressor, branco opressor, frangote, pedaço de lixo humano. Nossa, Gasorpasorp Field, olha, você é muito mal comigo, mas isso foi demais. Quero que se foda, sou a porra do Gasorpasorp Field, cus... Agora me dá a porra das minhas enchilhadas. Foram seis horas muito longas, mas transformamos a coisas indispensáveis, no globalmente compatível da internet 4 .0, para o enúmenoindispensável .com, se escreve com 3 ao invés do e. Ávila, é isso, acabamos de ser cumprados pelo Google. Eu tô tão orgulhado de você, Lucius. Então, quanto nós ganhamos? Nossa, esse negócio é meu. Segurança! Hã? Zuckerberg ando? Eu já Zuckerberghava pessoas antes do Zuckerberg perder as bolas. Eu sou o diabo, porra! Cola aqui! Aqui pra vocês.",
+      "description": "Branco, branco é opressor, branco opressor, frangote, pedaço de lixo humano.",
+      "hashtags": [
+        "#viral",
+        "#cortes",
+        "#branco",
+        "#porra",
+        "#opressor",
+        "#nossa",
+        "#gasorpasorp"
+      ],
+      "asset_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-dfe02170143e/dfe02170143e.mp4",
+      "thumbnail_url": "https://github.com/gabsinsider/CutCutAi/releases/download/clip-dfe02170143e/dfe02170143e.jpg",
+      "release_tag": "clip-dfe02170143e",
+      "reasons": [
+        "Pico de energia no áudio",
+        "história/viral 36/100",
+        "gancho 52/100",
+        "emoção 27/100",
+        "surpresa 10/100",
+        "tensão 8/100",
+        "entrega 20/100",
+        "cena 100/100",
+        "duração 61.7s",
         "final natural confirmado",
         "legendado"
       ]
