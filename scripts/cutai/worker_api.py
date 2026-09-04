@@ -13,30 +13,47 @@ def _read_json(path):
     try:return json.loads(path.read_text(encoding="utf-8"))
     except (OSError,ValueError,TypeError):return {}
 def _write_json(path,data):path.parent.mkdir(parents=True,exist_ok=True);path.write_text(json.dumps(data,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+def _safe_unlink(path):
+    try:size=path.stat().st_size;path.unlink();return 1,size
+    except OSError:return 0,0
 def _cleanup_storage():
-    """Remove apenas artefatos regeneráveis; nunca MP4/JPG/captions finais."""
-    removed=0;freed=0
-    sessions=ROOT/"sessions"
+    """Libera temporários e buffers órfãos sem apagar MP4/JPG/captions finais."""
+    removed=0;freed=0;sessions=ROOT/"sessions"
     roots=[p for p in sessions.iterdir() if p.is_dir()] if sessions.exists() else []
     legacy=ROOT/"continuous-live"
     if legacy.exists():roots.append(legacy)
+    # Após reinícios podem existir várias session.json marcadas como active, embora
+    # somente a mais recente possa ser retomada. Preservamos o buffer apenas dela.
+    active=[]
     for root in roots:
-        # Janelas concatenadas são temporárias e podem ocupar centenas de MB cada.
-        for p in root.rglob("window-segment-*.mkv"):
-            try:freed+=p.stat().st_size;p.unlink();removed+=1
-            except OSError:pass
-        for p in root.rglob("window-segment-*.txt"):
-            try:freed+=p.stat().st_size;p.unlink();removed+=1
-            except OSError:pass
-        # Segmentos de sessões já encerradas são descartáveis; os cortes finais
-        # ficam em analysis-* e são preservados para Ranking/Assistir.
         meta=_read_json(root/"session.json")
-        if meta.get("status") in {"stopped","finished"} or root==legacy:
-            stream=root/"stream"
-            if stream.exists():
-                for p in stream.glob("segment-*.mkv"):
-                    try:freed+=p.stat().st_size;p.unlink();removed+=1
-                    except OSError:pass
+        if meta.get("status")=="active" and _valid_url(str(meta.get("url",""))):
+            stamp=str(meta.get("last_started_at") or meta.get("resumed_at") or meta.get("started_at") or "")
+            active.append((stamp,root))
+    keep_active=max(active,key=lambda x:x[0])[1] if active else None
+    for root in roots:
+        # Resíduos de janelas/concatenação são sempre regeneráveis.
+        for pattern in ("window-*.mkv","window-*.txt","completed.csv"):
+            for p in root.rglob(pattern):
+                n,b=_safe_unlink(p);removed+=n;freed+=b
+        meta=_read_json(root/"session.json")
+        stream=root/"stream"
+        # Sessões encerradas, legado e sessões active órfãs não devem reter buffer.
+        purge_stream=(root==legacy or meta.get("status") in {"stopped","finished"} or (meta.get("status")=="active" and root!=keep_active))
+        if purge_stream and stream.exists():
+            for pattern in ("segment-*.mkv","segment-*.mkv.part","segment-*.part"):
+                for p in stream.glob(pattern):
+                    n,b=_safe_unlink(p);removed+=n;freed+=b
+            if meta.get("status")=="active" and root!=keep_active:
+                meta.update({"status":"orphaned","orphaned_at":datetime.now(UTC).isoformat()})
+                try:_write_json(root/"session.json",meta)
+                except OSError:pass
+    # Limpa também janelas temporárias deixadas no filesystem efêmero.
+    temp=Path(os.getenv("CUTAI_WINDOW_ROOT","/tmp/cutcutai-windows"))
+    if temp.exists():
+        for pattern in ("window-*.mkv","window-*.txt"):
+            for p in temp.glob(pattern):
+                n,b=_safe_unlink(p);removed+=n;freed+=b
     if removed:print(f"[worker-api] limpeza segura: {removed} temporário(s), {freed/1024/1024:.1f} MiB liberados",flush=True)
     return removed,freed
 def _state():
