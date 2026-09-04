@@ -101,7 +101,10 @@ def _range_has_ending(blocks: list[dict], start: float, end: float, source_durat
     if _explicit_conclusion(last["text"]): return True
     following = next((b for b in blocks if b["start"] >= end-.1), None)
     if following and _natural_boundary(last, following): return True
-    return _looks_complete(last["text"]) and source_duration-end >= 20.0 and not _starts_as_continuation(last["text"])
+    # Uma frase gramaticalmente completa não prova que a história terminou. Em live
+    # contínua, se não há conclusão explícita nem mudança clara de assunto, esperamos
+    # a próxima janela sobreposta em vez de publicar um corte truncado.
+    return False
 def _range_text(blocks: list[dict], start: float, end: float) -> str: return " ".join(b["text"] for b in blocks if b["end"] > start and b["start"] < end).strip()
 def _story_quality(blocks: list[dict], index: int, start: float, end: float, source_duration: float) -> float:
     main=blocks[index]; quality=_block_score(main); first=_words(main["text"])[:8]
