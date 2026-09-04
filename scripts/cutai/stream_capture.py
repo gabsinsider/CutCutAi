@@ -9,9 +9,10 @@ def segment_number(path):
     m=SEGMENT_RE.match(path.name);return int(m.group(1)) if m else -1
 def next_segment_number(output_dir):
     nums=[segment_number(p) for p in output_dir.glob("segment-*.mkv")];nums += [int(m.group(1)) for p in output_dir.glob("segment-*.mkv.part") if (m:=re.match(r"^segment-(\d+)\.mkv\.part$",p.name))];return max([n for n in nums if n>=0],default=-1)+1
+def _proxy():return normalize_proxy_url(os.getenv("CUTAI_PROXY_URL",""))
 def _resolver_base(client_args):
     cmd=["yt-dlp","--no-playlist","--no-progress","--extractor-retries","5","--fragment-retries","10","--retry-sleep","extractor:2"]
-    cookie=os.getenv("CUTAI_YOUTUBE_COOKIES_FILE","").strip();use=os.getenv("CUTAI_USE_YOUTUBE_COOKIES","").strip().lower() in {"1","true","yes"};ua=os.getenv("CUTAI_YOUTUBE_USER_AGENT","").strip();proxy=normalize_proxy_url(os.getenv("CUTAI_PROXY_URL",""))
+    cookie=os.getenv("CUTAI_YOUTUBE_COOKIES_FILE","").strip();use=os.getenv("CUTAI_USE_YOUTUBE_COOKIES","").strip().lower() in {"1","true","yes"};ua=os.getenv("CUTAI_YOUTUBE_USER_AGENT","").strip();proxy=_proxy()
     if use and cookie and Path(cookie).exists():cmd += ["--cookies",cookie]
     if ua:cmd += ["--user-agent",ua]
     if proxy:cmd += ["--proxy",proxy]
@@ -30,10 +31,7 @@ def _resolve(url,fmt):
 def _media_urls(url):
     video_fmt="bestvideo[height<=1080][fps<=30][vcodec^=avc1]/bestvideo[height<=1080][fps<=30]";audio_fmt="bestaudio[acodec^=mp4a]/bestaudio"
     try:return _resolve(url,video_fmt)[0],_resolve(url,audio_fmt)[0],"adaptive"
-    except (RuntimeError,IndexError):
-        # Alguns lives não expõem combinações adaptativas utilizáveis naquele instante.
-        # O fallback muxado mantém a captura viva em vez de derrubar o supervisor.
-        return _resolve(url,"best[height<=1080][fps<=30]/best")[0],None,"muxed"
+    except (RuntimeError,IndexError):return _resolve(url,"best[height<=1080][fps<=30]/best")[0],None,"muxed"
 def _input(url):return ["-thread_queue_size","4096","-http_persistent","0","-http_multiple","0","-reconnect","1","-reconnect_streamed","1","-reconnect_delay_max","5","-i",url]
 def _remove_incomplete(output_dir):
     removed=0
@@ -43,7 +41,7 @@ def _remove_incomplete(output_dir):
     (output_dir/"completed.csv").unlink(missing_ok=True)
     if removed:print(f"[stream-capture] removidos {removed} segmento(s) incompleto(s)",flush=True)
 def build_command(url,output_dir,segment_seconds):
-    output_dir.mkdir(parents=True,exist_ok=True);pattern=output_dir/"segment-%08d.mkv.part";completed=output_dir/"completed.csv";start=next_segment_number(output_dir);video,audio,mode=_media_urls(url);print(f"[stream-capture] modo={mode}; iniciando no segmento {start:08d}",flush=True);cmd=["ffmpeg","-hide_banner","-nostdin","-loglevel","warning"]+_input(video)
+    output_dir.mkdir(parents=True,exist_ok=True);pattern=output_dir/"segment-%08d.mkv.part";completed=output_dir/"completed.csv";start=next_segment_number(output_dir);print(f"[stream-capture] resolvendo transmissão; proxy={'configurada' if _proxy() else 'não configurada'}",flush=True);video,audio,mode=_media_urls(url);print(f"[stream-capture] modo={mode}; iniciando no segmento {start:08d}",flush=True);cmd=["ffmpeg","-hide_banner","-nostdin","-loglevel","warning"]+_input(video)
     if audio:cmd += _input(audio)+["-map","0:v:0","-map","1:a:0"]
     else:cmd += ["-map","0:v?","-map","0:a?"]
     cmd += ["-c","copy","-max_interleave_delta","0","-f","segment","-segment_format","matroska","-segment_time",str(segment_seconds),"-segment_start_number",str(start),"-segment_list",str(completed),"-segment_list_type","csv","-reset_timestamps","1",str(pattern)];return cmd
