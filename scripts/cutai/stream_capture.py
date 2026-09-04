@@ -1,6 +1,6 @@
 """Captura contínua segmentada, resiliente a reconexões e com vídeo/áudio adaptativos."""
 from __future__ import annotations
-import argparse,os,re,signal,subprocess,time
+import argparse,csv,os,re,signal,subprocess,time
 from pathlib import Path
 from .proxy import normalize_proxy_url
 from .validation import validate_source_url
@@ -8,7 +8,9 @@ SEGMENT_RE=re.compile(r"^segment-(\d+)\.mkv$")
 def segment_number(path):
     m=SEGMENT_RE.match(path.name);return int(m.group(1)) if m else -1
 def next_segment_number(output_dir):
-    nums=[segment_number(p) for p in output_dir.glob("segment-*.mkv")];return max([n for n in nums if n>=0],default=-1)+1
+    nums=[segment_number(p) for p in output_dir.glob("segment-*.mkv")]
+    nums += [int(m.group(1)) for p in output_dir.glob("segment-*.mkv.part") if (m:=re.match(r"^segment-(\d+)\.mkv\.part$",p.name))]
+    return max([n for n in nums if n>=0],default=-1)+1
 def _resolver_base():
     cmd=["yt-dlp","--no-playlist","--no-progress","--extractor-retries","5","--fragment-retries","10","--retry-sleep","extractor:2"]
     cookie=os.getenv("CUTAI_YOUTUBE_COOKIES_FILE","").strip();use=os.getenv("CUTAI_USE_YOUTUBE_COOKIES","").strip().lower() in {"1","true","yes"};ua=os.getenv("CUTAI_YOUTUBE_USER_AGENT","").strip();proxy=normalize_proxy_url(os.getenv("CUTAI_PROXY_URL",""))
@@ -29,26 +31,35 @@ def _remove_incomplete(output_dir):
     for p in output_dir.glob("*.part"):
         try:p.unlink();removed+=1
         except OSError:pass
+    (output_dir/"completed.csv").unlink(missing_ok=True)
     if removed:print(f"[stream-capture] removidos {removed} segmento(s) incompleto(s)",flush=True)
 def build_command(url,output_dir,segment_seconds):
-    output_dir.mkdir(parents=True,exist_ok=True);pattern=output_dir/"segment-%08d.mkv";start=next_segment_number(output_dir);video,audio,mode=_media_urls(url);print(f"[stream-capture] modo={mode}; iniciando no segmento {start:08d}",flush=True)
+    output_dir.mkdir(parents=True,exist_ok=True);pattern=output_dir/"segment-%08d.mkv.part";completed=output_dir/"completed.csv";start=next_segment_number(output_dir);video,audio,mode=_media_urls(url);print(f"[stream-capture] modo={mode}; iniciando no segmento {start:08d}",flush=True)
     cmd=["ffmpeg","-hide_banner","-nostdin","-loglevel","warning"]+_input(video)
     if audio:cmd += _input(audio)+["-map","0:v:0","-map","1:a:0"]
     else:cmd += ["-map","0:v?","-map","0:a?"]
-    # temp_file faz o FFmpeg gravar .part e renomear atomicamente para .mkv apenas
-    # quando o trailer/índices do segmento já foram finalizados.
-    cmd += ["-c","copy","-max_interleave_delta","0","-f","segment","-segment_time",str(segment_seconds),"-segment_start_number",str(start),"-segment_format_options","live=1","-segment_list_flags","+live","-reset_timestamps","1","-strftime","0",str(pattern)+".part"]
+    # O CSV do muxer segment só recebe uma entrada quando o segmento foi fechado.
+    # Portanto ele é a fonte de verdade; idade/mtime não é mais usada para decidir
+    # se um arquivo ainda está sendo escrito.
+    cmd += ["-c","copy","-max_interleave_delta","0","-f","segment","-segment_format","matroska","-segment_time",str(segment_seconds),"-segment_start_number",str(start),"-segment_list",str(completed),"-segment_list_type","csv","-reset_timestamps","1",str(pattern)]
     return cmd
+def _completed_names(output_dir):
+    path=output_dir/"completed.csv"
+    try:
+        with path.open(newline="",encoding="utf-8") as fh:return {Path(row[0]).name for row in csv.reader(fh) if row}
+    except OSError:return set()
 def _promote_finished(output_dir):
-    # O muxer segment não renomeia arquivos arbitrários; validamos cada .part com
-    # ffprobe e só então o tornamos visível ao analisador como .mkv.
-    for p in sorted(output_dir.glob("segment-*.mkv.part")):
+    promoted=0
+    for name in _completed_names(output_dir):
+        if not name.endswith(".mkv.part"):continue
+        p=output_dir/name
+        if not p.is_file():continue
+        target=Path(str(p)[:-5])
         try:
-            age=time.time()-p.stat().st_mtime
-            if age<3:continue
             r=subprocess.run(["ffprobe","-v","error","-show_entries","format=duration","-of","default=nw=1:nk=1",str(p)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=10)
-            if r.returncode==0:p.rename(Path(str(p)[:-5]))
+            if r.returncode==0:p.replace(target);promoted+=1
         except (OSError,subprocess.TimeoutExpired):pass
+    if promoted:print(f"[stream-capture] {promoted} segmento(s) finalizado(s) publicados",flush=True)
 def capture(url,output_dir,segment_seconds=30):
     validate_source_url(url)
     if segment_seconds<10 or segment_seconds>120:raise ValueError("segment_seconds deve ficar entre 10 e 120")
@@ -66,8 +77,11 @@ def capture(url,output_dir,segment_seconds=30):
             process.terminate()
             try:process.wait(timeout=10)
             except subprocess.TimeoutExpired:process.kill()
-        _remove_incomplete(output_dir)
-def ready_segments(output_dir,settle_seconds=2.0):
+        _promote_finished(output_dir)
+        for p in output_dir.glob("*.part"):
+            try:p.unlink()
+            except OSError:pass
+def ready_segments(output_dir,settle_seconds=1.0):
     now=time.time();files=sorted(output_dir.glob("segment-*.mkv"),key=segment_number);return [p for p in files if segment_number(p)>=0 and now-p.stat().st_mtime>=settle_seconds]
 def main():
     p=argparse.ArgumentParser(description="Captura contínua segmentada de uma live");p.add_argument("--url",required=True);p.add_argument("--output-dir",type=Path,default=Path("work/stream"));p.add_argument("--segment-seconds",type=int,default=30);a=p.parse_args();raise SystemExit(capture(a.url,a.output_dir,a.segment_seconds))
