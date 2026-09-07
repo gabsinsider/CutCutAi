@@ -1,6 +1,6 @@
 """Captura contínua segmentada, resiliente a reconexões e com vídeo/áudio adaptativos."""
 from __future__ import annotations
-import argparse,csv,os,re,signal,subprocess,time
+import argparse,csv,os,re,shutil,signal,subprocess,time
 from pathlib import Path
 from .proxy import normalize_proxy_url
 from .validation import validate_source_url
@@ -40,6 +40,19 @@ def _remove_incomplete(output_dir):
         except OSError:pass
     (output_dir/"completed.csv").unlink(missing_ok=True)
     if removed:print(f"[stream-capture] removidos {removed} segmento(s) incompleto(s)",flush=True)
+def _disk(output_dir):
+    try:return shutil.disk_usage(output_dir)
+    except OSError:return None
+def _disk_log(output_dir,label="armazenamento"):
+    usage=_disk(output_dir)
+    if not usage:return
+    print(f"[stream-capture] {label}: livre={usage.free/1024/1024:.1f} MiB usado={(usage.used/usage.total*100 if usage.total else 0):.1f}%",flush=True)
+def _low_disk(output_dir):
+    usage=_disk(output_dir)
+    if not usage:return False
+    reserve_mb=max(32,int(os.getenv("CUTAI_MIN_FREE_MB","96")))
+    reserve_pct=max(1,min(50,int(os.getenv("CUTAI_MIN_FREE_PERCENT","8"))))
+    return usage.free < reserve_mb*1024*1024 or (usage.total and usage.free/usage.total*100 < reserve_pct)
 def build_command(url,output_dir,segment_seconds):
     output_dir.mkdir(parents=True,exist_ok=True);pattern=output_dir/"segment-%08d.mkv.part";completed=output_dir/"completed.csv";start=next_segment_number(output_dir);print(f"[stream-capture] resolvendo transmissão; proxy={'configurada' if _proxy() else 'não configurada'}",flush=True);video,audio,mode=_media_urls(url);print(f"[stream-capture] modo={mode}; iniciando no segmento {start:08d}",flush=True);cmd=["ffmpeg","-hide_banner","-nostdin","-loglevel","warning"]+_input(video)
     if audio:cmd += _input(audio)+["-map","0:v:0","-map","1:a:0"]
@@ -66,11 +79,13 @@ def _promote_finished(output_dir):
 def capture(url,output_dir,segment_seconds=30):
     validate_source_url(url)
     if segment_seconds<10 or segment_seconds>120:raise ValueError("segment_seconds deve ficar entre 10 e 120")
-    _remove_incomplete(output_dir)
+    output_dir.mkdir(parents=True,exist_ok=True);_remove_incomplete(output_dir);_disk_log(output_dir,"início da captura")
+    if _low_disk(output_dir):
+        print("[stream-capture] armazenamento abaixo da reserva segura; aguardando limpeza antes de capturar",flush=True);return 77
     try:command=build_command(url,output_dir,segment_seconds)
     except Exception as exc:
         print(f"[stream-capture] falha temporária ao resolver live: {type(exc).__name__}: {exc}",flush=True);return 75
-    process=subprocess.Popen(command);stopping=False;last_progress=time.monotonic();stall_seconds=max(120,segment_seconds*4)
+    process=subprocess.Popen(command);stopping=False;last_progress=time.monotonic();last_disk_check=0.0;stall_seconds=max(120,segment_seconds*4)
     def stop(*_):
         nonlocal stopping
         if stopping:return
@@ -79,7 +94,16 @@ def capture(url,output_dir,segment_seconds=30):
     try:
         while process.poll() is None:
             if _promote_finished(output_dir):last_progress=time.monotonic()
-            if not stopping and time.monotonic()-last_progress>=stall_seconds:
+            now=time.monotonic()
+            if not stopping and now-last_disk_check>=10:
+                last_disk_check=now
+                if _low_disk(output_dir):
+                    _disk_log(output_dir,"reserva atingida")
+                    print("[stream-capture] pausando captura antes de encher o volume",flush=True);process.terminate()
+                    try:process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:process.kill();process.wait()
+                    return 77
+            if not stopping and now-last_progress>=stall_seconds:
                 print(f"[stream-capture] watchdog: nenhum segmento finalizado por {stall_seconds}s; reiniciando conexão",flush=True)
                 process.terminate()
                 try:process.wait(timeout=10)
