@@ -1,6 +1,6 @@
 """API HTTP persistente que recebe lives, controla sessões e serve os cortes."""
 from __future__ import annotations
-import hashlib,json,mimetypes,os,re,signal,subprocess,sys,threading
+import hashlib,json,mimetypes,os,re,shutil,signal,subprocess,sys,threading,time
 from datetime import UTC,datetime
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
@@ -16,49 +16,49 @@ def _write_json(path,data):path.parent.mkdir(parents=True,exist_ok=True);path.wr
 def _safe_unlink(path):
     try:size=path.stat().st_size;path.unlink();return 1,size
     except OSError:return 0,0
+def _storage_stats():
+    try:
+        u=shutil.disk_usage(ROOT);return {"total_mb":round(u.total/1048576,1),"used_mb":round(u.used/1048576,1),"free_mb":round(u.free/1048576,1),"used_percent":round((u.used/u.total*100) if u.total else 0,1)}
+    except OSError:return {}
 def _cleanup_storage():
-    """Libera temporários e buffers órfãos sem apagar MP4/JPG/captions finais."""
+    """Libera somente temporários/buffers órfãos; nunca MP4/JPG/captions finais."""
     removed=0;freed=0;sessions=ROOT/"sessions"
     roots=[p for p in sessions.iterdir() if p.is_dir()] if sessions.exists() else []
     legacy=ROOT/"continuous-live"
     if legacy.exists():roots.append(legacy)
-    # Após reinícios podem existir várias session.json marcadas como active, embora
-    # somente a mais recente possa ser retomada. Preservamos o buffer apenas dela.
     active=[]
     for root in roots:
         meta=_read_json(root/"session.json")
         if meta.get("status")=="active" and _valid_url(str(meta.get("url",""))):
-            stamp=str(meta.get("last_started_at") or meta.get("resumed_at") or meta.get("started_at") or "")
-            active.append((stamp,root))
+            stamp=str(meta.get("last_started_at") or meta.get("resumed_at") or meta.get("started_at") or "");active.append((stamp,root))
     keep_active=max(active,key=lambda x:x[0])[1] if active else None
     for root in roots:
-        # Resíduos de janelas/concatenação são sempre regeneráveis.
         for pattern in ("window-*.mkv","window-*.txt","completed.csv"):
-            for p in root.rglob(pattern):
-                n,b=_safe_unlink(p);removed+=n;freed+=b
-        meta=_read_json(root/"session.json")
-        stream=root/"stream"
-        # Sessões encerradas, legado e sessões active órfãs não devem reter buffer.
-        purge_stream=(root==legacy or meta.get("status") in {"stopped","finished"} or (meta.get("status")=="active" and root!=keep_active))
+            for p in root.rglob(pattern):n,b=_safe_unlink(p);removed+=n;freed+=b
+        meta=_read_json(root/"session.json");stream=root/"stream";purge_stream=(root==legacy or meta.get("status") in {"stopped","finished","orphaned"} or (meta.get("status")=="active" and root!=keep_active))
         if purge_stream and stream.exists():
             for pattern in ("segment-*.mkv","segment-*.mkv.part","segment-*.part"):
-                for p in stream.glob(pattern):
-                    n,b=_safe_unlink(p);removed+=n;freed+=b
+                for p in stream.glob(pattern):n,b=_safe_unlink(p);removed+=n;freed+=b
             if meta.get("status")=="active" and root!=keep_active:
                 meta.update({"status":"orphaned","orphaned_at":datetime.now(UTC).isoformat()})
                 try:_write_json(root/"session.json",meta)
                 except OSError:pass
-    # Limpa também janelas temporárias deixadas no filesystem efêmero.
     temp=Path(os.getenv("CUTAI_WINDOW_ROOT","/tmp/cutcutai-windows"))
     if temp.exists():
         for pattern in ("window-*.mkv","window-*.txt"):
-            for p in temp.glob(pattern):
-                n,b=_safe_unlink(p);removed+=n;freed+=b
-    if removed:print(f"[worker-api] limpeza segura: {removed} temporário(s), {freed/1024/1024:.1f} MiB liberados",flush=True)
+            for p in temp.glob(pattern):n,b=_safe_unlink(p);removed+=n;freed+=b
+    stats=_storage_stats()
+    if removed or stats:print(f"[worker-api] armazenamento: limpeza={removed} arquivo(s), liberados={freed/1048576:.1f} MiB, livre={stats.get('free_mb','?')} MiB, usado={stats.get('used_percent','?')}%",flush=True)
     return removed,freed
+def _maintenance_loop():
+    interval=max(15,int(os.getenv("CUTAI_STORAGE_CHECK_SECONDS","30")))
+    while True:
+        time.sleep(interval)
+        try:_cleanup_storage()
+        except Exception as exc:print(f"[worker-api] manutenção de armazenamento falhou: {type(exc).__name__}: {exc}",flush=True)
 def _state():
     running=bool(_process and _process.poll() is None);root=_session_root();detail=_read_json(root/"supervisor.json") if root else {}
-    return {"ok":True,"running":running,"url":_current_url if running else None,"session_id":_session_id,"supervisor":detail}
+    return {"ok":True,"running":running,"url":_current_url if running else None,"session_id":_session_id,"supervisor":detail,"storage":_storage_stats()}
 def _valid_url(v):
     try:p=urlparse(v);return p.scheme in {"http","https"} and bool(p.netloc)
     except ValueError:return False
@@ -66,8 +66,7 @@ def _launch(url,session_id):
     global _process,_current_url,_session_id;_session_id=session_id;root=ROOT/"sessions"/session_id;root.mkdir(parents=True,exist_ok=True);_process=subprocess.Popen([sys.executable,"-m","cutai.live_supervisor","--url",url,"--root",str(root),"--segment-seconds","30","--window-seconds","600","--overlap-seconds","90","--capture-restarts","12"]);_current_url=url
     meta=_read_json(root/"session.json");meta.update({"id":session_id,"url":url,"status":"active","last_started_at":datetime.now(UTC).isoformat(),"resume_count":int(meta.get("resume_count",0))});_write_json(root/"session.json",meta)
 def _stop(mark_stopped=True):
-    global _process,_current_url
-    root=_session_root()
+    global _process,_current_url;root=_session_root()
     if _process and _process.poll() is None:
         _process.send_signal(signal.SIGTERM)
         try:_process.wait(timeout=30)
@@ -178,6 +177,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     ROOT.mkdir(parents=True,exist_ok=True);_cleanup_storage()
     with _lock:_recover()
+    threading.Thread(target=_maintenance_loop,name="storage-maintenance",daemon=True).start()
     server=ThreadingHTTPServer(("0.0.0.0",PORT),Handler);print(f"CutCutAi worker API ouvindo em 0.0.0.0:{PORT}",flush=True)
     try:server.serve_forever()
     except KeyboardInterrupt:pass
