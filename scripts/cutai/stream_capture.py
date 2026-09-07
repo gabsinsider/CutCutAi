@@ -62,6 +62,7 @@ def _promote_finished(output_dir):
             if r.returncode==0:p.replace(target);promoted+=1
         except (OSError,subprocess.TimeoutExpired):pass
     if promoted:print(f"[stream-capture] {promoted} segmento(s) finalizado(s) publicados",flush=True)
+    return promoted
 def capture(url,output_dir,segment_seconds=30):
     validate_source_url(url)
     if segment_seconds<10 or segment_seconds>120:raise ValueError("segment_seconds deve ficar entre 10 e 120")
@@ -69,14 +70,22 @@ def capture(url,output_dir,segment_seconds=30):
     try:command=build_command(url,output_dir,segment_seconds)
     except Exception as exc:
         print(f"[stream-capture] falha temporária ao resolver live: {type(exc).__name__}: {exc}",flush=True);return 75
-    process=subprocess.Popen(command);stopping=False
+    process=subprocess.Popen(command);stopping=False;last_progress=time.monotonic();stall_seconds=max(120,segment_seconds*4)
     def stop(*_):
         nonlocal stopping
         if stopping:return
         stopping=True;process.terminate()
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
     try:
-        while process.poll() is None:_promote_finished(output_dir);time.sleep(1)
+        while process.poll() is None:
+            if _promote_finished(output_dir):last_progress=time.monotonic()
+            if not stopping and time.monotonic()-last_progress>=stall_seconds:
+                print(f"[stream-capture] watchdog: nenhum segmento finalizado por {stall_seconds}s; reiniciando conexão",flush=True)
+                process.terminate()
+                try:process.wait(timeout=10)
+                except subprocess.TimeoutExpired:process.kill();process.wait()
+                return 76
+            time.sleep(1)
         _promote_finished(output_dir);return process.returncode
     finally:
         if process.poll() is None:
