@@ -57,7 +57,9 @@ def build_command(url,output_dir,segment_seconds):
     output_dir.mkdir(parents=True,exist_ok=True);pattern=output_dir/"segment-%08d.mkv.part";completed=output_dir/"completed.csv";start=next_segment_number(output_dir);print(f"[stream-capture] resolvendo transmissão; proxy={'configurada' if _proxy() else 'não configurada'}",flush=True);video,audio,mode=_media_urls(url);print(f"[stream-capture] modo={mode}; iniciando no segmento {start:08d}",flush=True);cmd=["ffmpeg","-hide_banner","-nostdin","-loglevel","warning"]+_input(video)
     if audio:cmd += _input(audio)+["-map","0:v:0","-map","1:a:0"]
     else:cmd += ["-map","0:v?","-map","0:a?"]
-    cmd += ["-c","copy","-max_interleave_delta","0","-f","segment","-segment_format","matroska","-segment_time",str(segment_seconds),"-segment_start_number",str(start),"-segment_list",str(completed),"-segment_list_type","csv","-reset_timestamps","1",str(pattern)];return cmd
+    # Em live, GOPs podem ser irregulares. break_non_keyframes impede que um único .part
+    # cresça indefinidamente esperando um keyframe e consuma todo o volume de 500 MB.
+    cmd += ["-c","copy","-max_interleave_delta","0","-f","segment","-segment_format","matroska","-segment_time",str(segment_seconds),"-break_non_keyframes","1","-segment_start_number",str(start),"-segment_list",str(completed),"-segment_list_type","csv","-segment_list_flags","+live","-reset_timestamps","1",str(pattern)];return cmd
 def _completed_names(output_dir):
     path=output_dir/"completed.csv"
     try:
@@ -77,7 +79,6 @@ def _promote_finished(output_dir):
     if promoted:print(f"[stream-capture] {promoted} segmento(s) finalizado(s) publicados",flush=True)
     return promoted
 def _capture_activity(output_dir):
-    """Assinatura barata do progresso real do FFmpeg, inclusive do segmento .part em escrita."""
     newest_mtime=0;part_size=0;completed_size=0
     try:
         for p in output_dir.glob("segment-*.mkv.part"):
@@ -96,7 +97,7 @@ def capture(url,output_dir,segment_seconds=30):
     try:command=build_command(url,output_dir,segment_seconds)
     except Exception as exc:
         print(f"[stream-capture] falha temporária ao resolver live: {type(exc).__name__}: {exc}",flush=True);return 75
-    process=subprocess.Popen(command);stopping=False;last_progress=time.monotonic();last_disk_check=0.0;stall_seconds=max(240,segment_seconds*8);activity=_capture_activity(output_dir)
+    process=subprocess.Popen(command);stopping=False;last_activity=time.monotonic();last_published=time.monotonic();last_disk_check=0.0;activity=_capture_activity(output_dir);publish_timeout=max(120,segment_seconds*4);activity_timeout=max(240,segment_seconds*8)
     def stop(*_):
         nonlocal stopping
         if stopping:return
@@ -104,20 +105,23 @@ def capture(url,output_dir,segment_seconds=30):
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
     try:
         while process.poll() is None:
-            promoted=_promote_finished(output_dir);current_activity=_capture_activity(output_dir)
-            if promoted or current_activity!=activity:last_progress=time.monotonic();activity=current_activity
-            now=time.monotonic()
+            promoted=_promote_finished(output_dir);current_activity=_capture_activity(output_dir);now=time.monotonic()
+            if promoted:last_published=now;last_activity=now
+            if current_activity!=activity:last_activity=now;activity=current_activity
             if not stopping and now-last_disk_check>=10:
                 last_disk_check=now
                 if _low_disk(output_dir):
-                    _disk_log(output_dir,"reserva atingida")
-                    print("[stream-capture] pausando captura antes de encher o volume",flush=True);process.terminate()
+                    _disk_log(output_dir,"reserva atingida");print("[stream-capture] pausando captura antes de encher o volume",flush=True);process.terminate()
                     try:process.wait(timeout=10)
                     except subprocess.TimeoutExpired:process.kill();process.wait()
                     return 77
-            if not stopping and now-last_progress>=stall_seconds:
-                print(f"[stream-capture] watchdog: nenhuma atividade de captura por {stall_seconds}s; renovando URLs da live",flush=True)
-                process.terminate()
+            if not stopping and now-last_published>=publish_timeout:
+                print(f"[stream-capture] watchdog: nenhum segmento publicado por {publish_timeout}s; renovando conexão",flush=True);process.terminate()
+                try:process.wait(timeout=10)
+                except subprocess.TimeoutExpired:process.kill();process.wait()
+                return 76
+            if not stopping and now-last_activity>=activity_timeout:
+                print(f"[stream-capture] watchdog: nenhuma atividade por {activity_timeout}s; renovando conexão",flush=True);process.terminate()
                 try:process.wait(timeout=10)
                 except subprocess.TimeoutExpired:process.kill();process.wait()
                 return 76
