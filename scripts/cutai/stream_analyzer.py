@@ -14,6 +14,14 @@ def _load_cursor(path):
     except (ValueError,OSError,TypeError,json.JSONDecodeError):return 0
 def _save(path,**data):path.parent.mkdir(parents=True,exist_ok=True);path.write_text(json.dumps(data,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
 def _available(stream_dir,next_segment):return [p for p in ready_segments(stream_dir) if segment_number(p)>=next_segment]
+def _recover_cursor(stream_dir,next_segment):
+    """Recupera cursor persistido quando uma nova captura reinicia a numeração."""
+    ready=ready_segments(stream_dir)
+    if not ready:return next_segment
+    nums=[segment_number(p) for p in ready];first,last=nums[0],nums[-1]
+    if next_segment>last+1:
+        _log(f"cursor antigo detectado ({next_segment}); retomando do segmento {first}");return first
+    return next_segment
 def _cleanup(stream_dir,keep_from):
     removed=0;freed=0
     for p in stream_dir.glob("segment-*.mkv"):
@@ -58,26 +66,21 @@ def analyze_once(url,stream_dir,workdir,next_segment,needed,overlap,final=False)
     advance=take if final and take<needed else max(1,take-overlap);new_next=segment_number(selected[advance]) if advance<len(selected) else segment_number(selected[-1])+1
     success=False
     try:
-        # A janela em /tmp passa a ser a cópia de trabalho. Assim que ela estiver
-        # montada, os segmentos antigos no volume persistente podem ser removidos
-        # ANTES da transcrição/renderização. Mantemos apenas o overlap necessário
-        # para a próxima janela, liberando espaço para os MP4 finais.
-        _concat(selected,window)
-        _cleanup(stream_dir,new_next)
-        _save(state,next_segment=next_segment,status="analyzing",available_segments=available,needed_segments=needed,last_segment=last)
+        _concat(selected,window);_cleanup(stream_dir,new_next);_save(state,next_segment=next_segment,status="analyzing",available_segments=available,needed_segments=needed,last_segment=last)
         clips=process_source(window,url,analysis_dir,"Live contínua");clips=_deduplicate(clips,analysis_dir,workdir);_log(f"janela analisada: {len(clips)} corte(s) novo(s) gerado(s)");success=True
     except Exception as exc:_log(f"erro na janela {first}..{last}: {type(exc).__name__}: {exc}")
     finally:window.unlink(missing_ok=True)
-    # Se a montagem falhou antes da limpeza, este segundo cleanup ainda garante que
-    # uma janela defeituosa não prenda o volume. Se já limpamos antes, é um no-op.
     _cleanup(stream_dir,new_next);_save(state,next_segment=new_next,last_segment=last,status="drained" if final else "watching",needed_segments=needed,last_window_success=success)
     return new_next,True
 def run(url,stream_dir,workdir,segment_seconds=30,window_seconds=600,overlap_seconds=90,poll_seconds=5,stop_file=None):
-    needed=max(2,window_seconds//segment_seconds);overlap=max(1,overlap_seconds//segment_seconds);workdir.mkdir(parents=True,exist_ok=True);temp_root=Path(os.getenv("CUTAI_WINDOW_ROOT","/tmp/cutcutai-windows"));temp_root.mkdir(parents=True,exist_ok=True);_cleanup_temp(temp_root);state=workdir/"stream-analyzer.json";next_segment=_load_cursor(state);last_report=0.0;existing=ready_segments(stream_dir)
-    if existing and next_segment>segment_number(existing[-1])+1:next_segment=segment_number(existing[0])
-    _cleanup(stream_dir,next_segment)
+    needed=max(2,window_seconds//segment_seconds);overlap=max(1,overlap_seconds//segment_seconds);workdir.mkdir(parents=True,exist_ok=True);temp_root=Path(os.getenv("CUTAI_WINDOW_ROOT","/tmp/cutcutai-windows"));temp_root.mkdir(parents=True,exist_ok=True);_cleanup_temp(temp_root);state=workdir/"stream-analyzer.json";next_segment=_load_cursor(state);last_report=0.0
+    next_segment=_recover_cursor(stream_dir,next_segment);_cleanup(stream_dir,next_segment)
     while True:
         final=bool(stop_file and stop_file.exists())
+        # A captura pode ser reiniciada pelo supervisor e voltar a uma faixa menor de IDs.
+        # Reavaliar o cursor durante a execução evita esperar para sempre por IDs antigos.
+        recovered=_recover_cursor(stream_dir,next_segment)
+        if recovered!=next_segment:next_segment=recovered;_save(state,next_segment=next_segment,status="recovered",needed_segments=needed)
         try:next_segment,worked=analyze_once(url,stream_dir,workdir,next_segment,needed,overlap,final)
         except Exception as exc:_log(f"erro recuperável: {type(exc).__name__}: {exc}");worked=False
         if final and not worked:_save(state,next_segment=next_segment,status="finished");return
