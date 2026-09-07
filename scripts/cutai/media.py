@@ -18,19 +18,25 @@ def _db_value(text,label,fallback):
     return fallback
 def scene_score(path: Path) -> float:
     result=subprocess.run(["ffmpeg","-hide_banner","-i",str(path),"-filter:v","select='gt(scene,0.35)',showinfo","-f","null","-"],text=True,capture_output=True,check=False);return min(100.0,20+result.stderr.count("showinfo")*5.0)
-def make_clip_range(source: Path,output: Path,start: float,end: float) -> None:
-    """Gera MP4 reproduzível com consumo previsível de CPU/memória no worker."""
-    start=max(0.0,start);length=max(1.0,end-start);output.parent.mkdir(parents=True,exist_ok=True)
-    # Railway pode matar o FFmpeg com SIGKILL quando o encode concorre por recursos
-    # com transcrição/captura. Limitamos threads e usamos preset ultrafast; CRF 18
-    # preserva a qualidade visual enquanto reduz muito o pico de CPU/memória.
-    command=["ffmpeg","-y","-threads","2","-filter_threads","1","-filter_complex_threads","1","-fflags","+genpts+discardcorrupt","-err_detect","ignore_err","-i",str(source),"-ss",str(start),"-t",str(length),"-map","0:v:0","-map","0:a:0?","-vf","setpts=PTS-STARTPTS","-c:v","libx264","-threads:v","2","-preset","ultrafast","-crf","18","-profile:v","high","-pix_fmt","yuv420p","-fps_mode:v","vfr"]
+def _clip_command(source: Path,output: Path,start: float,length: float,copy_audio: bool=False) -> list[str]:
+    command=["ffmpeg","-y","-threads","2","-filter_threads","1","-filter_complex_threads","1","-fflags","+genpts+discardcorrupt","-err_detect","ignore_err","-ss",str(start),"-i",str(source),"-t",str(length),"-map","0:v:0","-map","0:a:0?","-vf","setpts=PTS-STARTPTS","-c:v","libx264","-threads:v","2","-preset","ultrafast","-crf","18","-profile:v","high","-pix_fmt","yuv420p","-fps_mode:v","vfr"]
     probe=subprocess.run(["ffprobe","-v","error","-select_streams","a:0","-show_entries","stream=index","-of","csv=p=0",str(source)],text=True,capture_output=True,check=False)
-    if probe.stdout.strip():command += ["-af","asetpts=PTS-STARTPTS","-c:a","aac","-b:a","192k"]
+    if probe.stdout.strip():
+        command += ["-c:a","copy"] if copy_audio else ["-af","asetpts=PTS-STARTPTS","-c:a","aac","-b:a","192k"]
     command += ["-avoid_negative_ts","make_zero","-movflags","+faststart","-shortest",str(output)]
-    try:run(command)
-    except subprocess.CalledProcessError:
-        output.unlink(missing_ok=True);raise
+    return command
+def make_clip_range(source: Path,output: Path,start: float,end: float) -> None:
+    """Gera MP4 resiliente a descontinuidades/timestamps de janelas HLS concatenadas."""
+    start=max(0.0,start);length=max(1.0,end-start);output.parent.mkdir(parents=True,exist_ok=True)
+    attempts=[_clip_command(source,output,start,length,False),_clip_command(source,output,start,length,True)]
+    errors=[]
+    for command in attempts:
+        try:
+            run(command)
+            if output.exists() and output.stat().st_size>0:return
+        except subprocess.CalledProcessError as exc:
+            detail=(exc.stderr or exc.stdout or str(exc))[-1800:];errors.append(detail);output.unlink(missing_ok=True)
+    raise RuntimeError("FFmpeg não conseguiu gerar o corte após fallback de áudio. Último erro: "+(errors[-1] if errors else "desconhecido"))
 
 def _ass_time(seconds):
     seconds=max(0.0,seconds);hours=int(seconds//3600);minutes=int((seconds%3600)//60);secs=seconds%60;return f"{hours}:{minutes:02d}:{secs:05.2f}"
