@@ -32,7 +32,7 @@ def _media_urls(url):
     video_fmt="bestvideo[height<=1080][fps<=30][vcodec^=avc1]/bestvideo[height<=1080][fps<=30]";audio_fmt="bestaudio[acodec^=mp4a]/bestaudio"
     try:return _resolve(url,video_fmt)[0],_resolve(url,audio_fmt)[0],"adaptive"
     except (RuntimeError,IndexError):return _resolve(url,"best[height<=1080][fps<=30]/best")[0],None,"muxed"
-def _input(url):return ["-thread_queue_size","4096","-http_persistent","0","-http_multiple","0","-reconnect","1","-reconnect_streamed","1","-reconnect_delay_max","5","-i",url]
+def _input(url):return ["-thread_queue_size","4096","-fflags","+genpts+discardcorrupt","-http_persistent","0","-http_multiple","0","-reconnect","1","-reconnect_streamed","1","-reconnect_delay_max","5","-i",url]
 def _remove_incomplete(output_dir):
     removed=0
     for p in output_dir.glob("*.part"):
@@ -57,9 +57,9 @@ def build_command(url,output_dir,segment_seconds):
     output_dir.mkdir(parents=True,exist_ok=True);pattern=output_dir/"segment-%08d.mkv.part";completed=output_dir/"completed.csv";start=next_segment_number(output_dir);print(f"[stream-capture] resolvendo transmissão; proxy={'configurada' if _proxy() else 'não configurada'}",flush=True);video,audio,mode=_media_urls(url);print(f"[stream-capture] modo={mode}; iniciando no segmento {start:08d}",flush=True);cmd=["ffmpeg","-hide_banner","-nostdin","-loglevel","warning"]+_input(video)
     if audio:cmd += _input(audio)+["-map","0:v:0","-map","1:a:0"]
     else:cmd += ["-map","0:v?","-map","0:a?"]
-    # Em live, GOPs podem ser irregulares. break_non_keyframes impede que um único .part
-    # cresça indefinidamente esperando um keyframe e consuma todo o volume de 500 MB.
-    cmd += ["-c","copy","-max_interleave_delta","0","-f","segment","-segment_format","matroska","-segment_time",str(segment_seconds),"-break_non_keyframes","1","-segment_start_number",str(start),"-segment_list",str(completed),"-segment_list_type","csv","-segment_list_flags","+live","-reset_timestamps","1",str(pattern)];return cmd
+    # HLS de lives pode carregar timestamps antigos/descontínuos. A rotação pelo relógio
+    # impede que o muxer espere indefinidamente o timestamp/keyframe do provedor.
+    cmd += ["-c","copy","-max_interleave_delta","0","-avoid_negative_ts","make_zero","-f","segment","-segment_format","matroska","-segment_time",str(segment_seconds),"-segment_atclocktime","1","-break_non_keyframes","1","-segment_time_delta","0.5","-segment_start_number",str(start),"-segment_list",str(completed),"-segment_list_type","csv","-segment_list_flags","+live","-reset_timestamps","1",str(pattern)];return cmd
 def _completed_names(output_dir):
     path=output_dir/"completed.csv"
     try:
