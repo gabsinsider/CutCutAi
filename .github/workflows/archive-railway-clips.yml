@@ -2,6 +2,10 @@ name: Arquivar cortes contínuos
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/archive-railway-clips.yml'
   schedule:
     - cron: '*/5 * * * *'
 
@@ -33,6 +37,7 @@ jobs:
                   captions=str(c.get('captions_url','')).strip()
                   if cid and asset.startswith('https://cutcutai-production.up.railway.app/'):
                       f.write('\t'.join([cid,asset,thumb,captions])+'\n')
+          print(f"cortes locais encontrados: {sum(1 for _ in open('clips.tsv',encoding='utf-8'))}")
           PY
 
       - name: Arquivar arquivos locais em Releases
