@@ -1,4 +1,4 @@
-"""Captura contínua em blocos independentes e atômicos para lives longas."""
+"""Captura contínua segmentada para lives longas, preservando continuidade A/V."""
 from __future__ import annotations
 import argparse,os,re,shutil,signal,subprocess,time
 from pathlib import Path
@@ -50,53 +50,53 @@ def _valid_segment(path,min_seconds):
         r=subprocess.run(["ffprobe","-v","error","-show_entries","format=duration","-of","default=nw=1:nk=1",str(path)],text=True,capture_output=True,timeout=12)
         return r.returncode==0 and float((r.stdout or "0").strip())>=min_seconds
     except (OSError,ValueError,subprocess.TimeoutExpired):return False
-def _block_command(video,audio,target,seconds):
+def _capture_command(video,audio,target,segment_seconds,start):
     cmd=["ffmpeg","-hide_banner","-nostdin","-loglevel","warning"]+_input(video)
     if audio:cmd += _input(audio)+["-map","0:v:0","-map","1:a:0"]
     else:cmd += ["-map","0:v?","-map","0:a?"]
-    # Cada bloco possui seu próprio processo/arquivo. Não dependemos do muxer segment,
-    # de GOPs ou dos timestamps HLS para fechar e publicar um segmento.
-    return cmd+["-t",str(seconds),"-c","copy","-max_interleave_delta","0","-avoid_negative_ts","make_zero","-f","matroska",str(target)]
+    # Uma única conexão contínua evita que cada bloco volte ao mesmo ponto da playlist HLS.
+    # O muxer segment fecha os blocos dentro dessa conexão; timestamps são regenerados.
+    pattern=target/"segment-%08d.mkv"
+    return cmd+["-c","copy","-max_interleave_delta","0","-avoid_negative_ts","make_zero","-f","segment","-segment_format","matroska","-segment_time",str(segment_seconds),"-break_non_keyframes","1","-segment_start_number",str(start),"-reset_timestamps","1",str(pattern)]
 def capture(url,output_dir,segment_seconds=30):
     validate_source_url(url)
     if segment_seconds<10 or segment_seconds>120:raise ValueError("segment_seconds deve ficar entre 10 e 120")
     output_dir.mkdir(parents=True,exist_ok=True)
-    for p in output_dir.glob("*.part"):
-        try:p.unlink()
-        except OSError:pass
+    for p in output_dir.glob("*.part"):p.unlink(missing_ok=True)
     _disk_log(output_dir,"início da captura")
     if _low_disk(output_dir):print("[stream-capture] armazenamento abaixo da reserva segura; aguardando limpeza",flush=True);return 77
     print(f"[stream-capture] resolvendo transmissão; proxy={'configurada' if _proxy() else 'não configurada'}",flush=True)
     try:video,audio,mode=_media_urls(url)
     except Exception as exc:print(f"[stream-capture] falha temporária ao resolver live: {type(exc).__name__}: {exc}",flush=True);return 75
-    number=next_segment_number(output_dir);stopping=False;process=None
-    print(f"[stream-capture] modo={mode}; captura atômica a partir de {number:08d}",flush=True)
+    start=next_segment_number(output_dir);print(f"[stream-capture] modo={mode}; conexão contínua a partir de {start:08d}",flush=True)
+    process=subprocess.Popen(_capture_command(video,audio,output_dir,segment_seconds,start));stopping=False;seen=set(p.name for p in output_dir.glob("segment-*.mkv"));last_publish=time.monotonic()
     def stop(*_):
-        nonlocal stopping,process
+        nonlocal stopping
         stopping=True
-        if process and process.poll() is None:process.terminate()
+        if process.poll() is None:process.terminate()
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
-    while not stopping:
-        if _low_disk(output_dir):_disk_log(output_dir,"reserva atingida");return 77
-        part=output_dir/f"segment-{number:08d}.mkv.part";final=output_dir/f"segment-{number:08d}.mkv"
-        started=time.monotonic();process=subprocess.Popen(_block_command(video,audio,part,segment_seconds))
-        try:code=process.wait(timeout=segment_seconds+90)
-        except subprocess.TimeoutExpired:
-            process.terminate()
-            try:process.wait(timeout=10)
-            except subprocess.TimeoutExpired:process.kill();process.wait()
-            code=76
-        if stopping:
-            part.unlink(missing_ok=True);break
-        elapsed=time.monotonic()-started
-        if code==0 and part.exists() and _valid_segment(part,max(5,segment_seconds*0.55)):
-            part.replace(final);print(f"[stream-capture] segmento {number:08d} publicado ({elapsed:.1f}s)",flush=True);number+=1;continue
-        part.unlink(missing_ok=True)
-        print(f"[stream-capture] bloco falhou/expirou (exit={code}, {elapsed:.1f}s); renovando URLs",flush=True)
-        return 76
-    return 0
-def ready_segments(output_dir,settle_seconds=1.0):
-    now=time.time();files=sorted(output_dir.glob("segment-*.mkv"),key=segment_number);return [p for p in files if segment_number(p)>=0 and now-p.stat().st_mtime>=settle_seconds]
+    try:
+        while process.poll() is None:
+            if _low_disk(output_dir):
+                _disk_log(output_dir,"reserva atingida");process.terminate();return 77
+            current=sorted(output_dir.glob("segment-*.mkv"),key=segment_number)
+            # O arquivo mais novo pode ainda estar aberto. Só anunciamos os anteriores.
+            closed=current[:-1] if len(current)>1 else []
+            for p in closed:
+                if p.name in seen:continue
+                if _valid_segment(p,max(5,segment_seconds*0.45)):
+                    seen.add(p.name);last_publish=time.monotonic();print(f"[stream-capture] segmento {segment_number(p):08d} publicado",flush=True)
+            if not stopping and time.monotonic()-last_publish>max(150,segment_seconds*5):
+                print("[stream-capture] watchdog: captura sem novos blocos; renovando URLs",flush=True);process.terminate();return 76
+            time.sleep(2)
+        return process.returncode or 0
+    finally:
+        if process.poll() is None:process.terminate()
+def ready_segments(output_dir,settle_seconds=2.0):
+    now=time.time();files=sorted(output_dir.glob("segment-*.mkv"),key=segment_number)
+    # Não entregar o arquivo mais novo enquanto FFmpeg ainda pode estar escrevendo nele.
+    settled=[p for p in files if segment_number(p)>=0 and now-p.stat().st_mtime>=settle_seconds]
+    return settled[:-1] if len(settled)>1 else []
 def main():
-    p=argparse.ArgumentParser(description="Captura contínua atômica de uma live");p.add_argument("--url",required=True);p.add_argument("--output-dir",type=Path,default=Path("work/stream"));p.add_argument("--segment-seconds",type=int,default=30);a=p.parse_args();raise SystemExit(capture(a.url,a.output_dir,a.segment_seconds))
+    p=argparse.ArgumentParser(description="Captura contínua de uma live");p.add_argument("--url",required=True);p.add_argument("--output-dir",type=Path,default=Path("work/stream"));p.add_argument("--segment-seconds",type=int,default=30);a=p.parse_args();raise SystemExit(capture(a.url,a.output_dir,a.segment_seconds))
 if __name__=="__main__":main()
