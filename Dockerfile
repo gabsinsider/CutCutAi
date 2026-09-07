@@ -20,4 +20,4 @@ RUN pip install --upgrade pip \
 
 RUN mkdir -p /data/cutcutai
 
-CMD ["python", "-m", "cutai.worker_api"]
+CMD ["python", "-m", "cutai.worker_api_v2"]
