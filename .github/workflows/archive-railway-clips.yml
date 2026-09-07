@@ -1,0 +1,59 @@
+name: Arquivar cortes contínuos
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/5 * * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: archive-railway-clips
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Buscar ranking do worker
+        env:
+          WORKER: https://cutcutai-production.up.railway.app
+        run: |
+          set -euo pipefail
+          curl --fail --retry 3 "$WORKER/ranking" -o ranking.json
+          python3 - <<'PY'
+          import json
+          data=json.load(open('ranking.json',encoding='utf-8'))
+          with open('clips.tsv','w',encoding='utf-8') as f:
+              for c in data.get('clips',[]):
+                  cid=str(c.get('id','')).strip()
+                  asset=str(c.get('asset_url','')).strip()
+                  thumb=str(c.get('thumbnail_url','')).strip()
+                  captions=str(c.get('captions_url','')).strip()
+                  if cid and asset.startswith('https://cutcutai-production.up.railway.app/'):
+                      f.write('\t'.join([cid,asset,thumb,captions])+'\n')
+          PY
+
+      - name: Arquivar arquivos locais em Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          while IFS=$'\t' read -r cid asset thumb captions; do
+            [ -n "$cid" ] || continue
+            tag="liveclip-$cid"
+            if gh release view "$tag" --repo "$GH_REPO" >/dev/null 2>&1; then
+              echo "$cid já arquivado"
+              continue
+            fi
+            mkdir -p "archive/$cid"
+            curl --fail --retry 3 "$asset" -o "archive/$cid/$cid.mp4"
+            files=("archive/$cid/$cid.mp4")
+            if [ -n "${thumb:-}" ]; then curl --fail --retry 2 "$thumb" -o "archive/$cid/$cid.jpg" && files+=("archive/$cid/$cid.jpg") || true; fi
+            if [ -n "${captions:-}" ]; then curl --fail --retry 2 "$captions" -o "archive/$cid/$cid.captions.json" && files+=("archive/$cid/$cid.captions.json") || true; fi
+            gh release create "$tag" "${files[@]}" --repo "$GH_REPO" --title "CutCutAi · Live · $cid" --notes "Corte limpo arquivado automaticamente pelo worker contínuo."
+            rm -rf "archive/$cid"
+            echo "$cid arquivado em $tag"
+          done < clips.tsv
