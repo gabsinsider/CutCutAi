@@ -76,6 +76,17 @@ def _promote_finished(output_dir):
         except (OSError,subprocess.TimeoutExpired):pass
     if promoted:print(f"[stream-capture] {promoted} segmento(s) finalizado(s) publicados",flush=True)
     return promoted
+def _capture_activity(output_dir):
+    """Assinatura barata do progresso real do FFmpeg, inclusive do segmento .part em escrita."""
+    newest_mtime=0;part_size=0;completed_size=0
+    try:
+        for p in output_dir.glob("segment-*.mkv.part"):
+            st=p.stat();newest_mtime=max(newest_mtime,st.st_mtime_ns);part_size=max(part_size,st.st_size)
+        completed=output_dir/"completed.csv"
+        if completed.exists():
+            st=completed.stat();newest_mtime=max(newest_mtime,st.st_mtime_ns);completed_size=st.st_size
+    except OSError:pass
+    return newest_mtime,part_size,completed_size
 def capture(url,output_dir,segment_seconds=30):
     validate_source_url(url)
     if segment_seconds<10 or segment_seconds>120:raise ValueError("segment_seconds deve ficar entre 10 e 120")
@@ -85,7 +96,7 @@ def capture(url,output_dir,segment_seconds=30):
     try:command=build_command(url,output_dir,segment_seconds)
     except Exception as exc:
         print(f"[stream-capture] falha temporária ao resolver live: {type(exc).__name__}: {exc}",flush=True);return 75
-    process=subprocess.Popen(command);stopping=False;last_progress=time.monotonic();last_disk_check=0.0;stall_seconds=max(120,segment_seconds*4)
+    process=subprocess.Popen(command);stopping=False;last_progress=time.monotonic();last_disk_check=0.0;stall_seconds=max(240,segment_seconds*8);activity=_capture_activity(output_dir)
     def stop(*_):
         nonlocal stopping
         if stopping:return
@@ -93,7 +104,8 @@ def capture(url,output_dir,segment_seconds=30):
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
     try:
         while process.poll() is None:
-            if _promote_finished(output_dir):last_progress=time.monotonic()
+            promoted=_promote_finished(output_dir);current_activity=_capture_activity(output_dir)
+            if promoted or current_activity!=activity:last_progress=time.monotonic();activity=current_activity
             now=time.monotonic()
             if not stopping and now-last_disk_check>=10:
                 last_disk_check=now
@@ -104,7 +116,7 @@ def capture(url,output_dir,segment_seconds=30):
                     except subprocess.TimeoutExpired:process.kill();process.wait()
                     return 77
             if not stopping and now-last_progress>=stall_seconds:
-                print(f"[stream-capture] watchdog: nenhum segmento finalizado por {stall_seconds}s; reiniciando conexão",flush=True)
+                print(f"[stream-capture] watchdog: nenhuma atividade de captura por {stall_seconds}s; renovando URLs da live",flush=True)
                 process.terminate()
                 try:process.wait(timeout=10)
                 except subprocess.TimeoutExpired:process.kill();process.wait()
