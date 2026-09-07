@@ -55,16 +55,21 @@ def analyze_once(url,stream_dir,workdir,next_segment,needed,overlap,final=False)
     take=needed if available>=needed else (available if final and available>=2 else 0)
     if not take:return next_segment,False
     selected=segments[:take];first,last=selected[0].stem,selected[-1].stem;temp_root=Path(os.getenv("CUTAI_WINDOW_ROOT","/tmp/cutcutai-windows"));temp_root.mkdir(parents=True,exist_ok=True);window=temp_root/f"window-{first}-{last}.mkv";analysis_dir=workdir/f"analysis-{first}-{last}";_log(f"montando janela {first}..{last} com {take} segmentos em {temp_root}")
+    advance=take if final and take<needed else max(1,take-overlap);new_next=segment_number(selected[advance]) if advance<len(selected) else segment_number(selected[-1])+1
     success=False
     try:
-        _concat(selected,window);clips=process_source(window,url,analysis_dir,"Live contínua");clips=_deduplicate(clips,analysis_dir,workdir);_log(f"janela analisada: {len(clips)} corte(s) novo(s) gerado(s)");success=True
+        # A janela em /tmp passa a ser a cópia de trabalho. Assim que ela estiver
+        # montada, os segmentos antigos no volume persistente podem ser removidos
+        # ANTES da transcrição/renderização. Mantemos apenas o overlap necessário
+        # para a próxima janela, liberando espaço para os MP4 finais.
+        _concat(selected,window)
+        _cleanup(stream_dir,new_next)
+        _save(state,next_segment=next_segment,status="analyzing",available_segments=available,needed_segments=needed,last_segment=last)
+        clips=process_source(window,url,analysis_dir,"Live contínua");clips=_deduplicate(clips,analysis_dir,workdir);_log(f"janela analisada: {len(clips)} corte(s) novo(s) gerado(s)");success=True
     except Exception as exc:_log(f"erro na janela {first}..{last}: {type(exc).__name__}: {exc}")
     finally:window.unlink(missing_ok=True)
-    advance=take if final and take<needed else max(1,take-overlap);new_next=segment_number(selected[advance]) if advance<len(selected) else segment_number(selected[-1])+1
-    # Uma janela que falha não pode permanecer eternamente prendendo 20+ segmentos
-    # no volume. Mantemos apenas o overlap para contexto e seguimos para a próxima.
-    # Isso sacrifica no máximo uma janela defeituosa, mas impede que uma live longa
-    # pare completamente por falta de disco.
+    # Se a montagem falhou antes da limpeza, este segundo cleanup ainda garante que
+    # uma janela defeituosa não prenda o volume. Se já limpamos antes, é um no-op.
     _cleanup(stream_dir,new_next);_save(state,next_segment=new_next,last_segment=last,status="drained" if final else "watching",needed_segments=needed,last_window_success=success)
     return new_next,True
 def run(url,stream_dir,workdir,segment_seconds=30,window_seconds=600,overlap_seconds=90,poll_seconds=5,stop_file=None):
