@@ -46,8 +46,13 @@ jobs:
         env: {GH_TOKEN: "${{ github.token }}"}
         run: |
           mkdir -p work
-          gh release download "clip-${{ steps.request.outputs.clip }}" --pattern "${{ steps.request.outputs.clip }}.mp4" --dir work
-          gh release download "clip-${{ steps.request.outputs.clip }}" --pattern "${{ steps.request.outputs.clip }}.captions.json" --dir work || true
+          CLIP="${{ steps.request.outputs.clip }}"
+          # Cortes clássicos usam clip-ID; cortes do worker contínuo são
+          # arquivados como liveclip-ID. O editor aceita ambos sem alterar a fonte.
+          TAG="clip-$CLIP"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then TAG="liveclip-$CLIP"; fi
+          gh release download "$TAG" --pattern "$CLIP.mp4" --dir work
+          gh release download "$TAG" --pattern "$CLIP.captions.json" --dir work || true
       - name: Renderizar escolhas do usuário
         run: >-
           PYTHONPATH=scripts python -m cutai.editor
