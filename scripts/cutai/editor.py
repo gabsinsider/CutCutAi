@@ -31,17 +31,21 @@ def _write_ass(path,captions,color,highlight,size,position,auto_emphasis):
     path.write_text(header+'\n'.join(events)+'\n',encoding='utf-8')
 
 def _video_filter(height,filter_name):
-    # Mantém a proporção original e garante dimensões pares para libx264.
-    # scale=-2:<altura> pode produzir largura ímpar em fontes verticais e o
-    # encoder H.264 então encerra com código 1.
-    scale=f"scale=-2:{height}:flags=lanczos,scale=trunc(iw/2)*2:trunc(ih/2)*2"
-    base=FILTERS.get(filter_name,'null')
-    return [base,scale]
+    # -2 já solicita ao scaler uma dimensão divisível por 2. Evitamos uma
+    # segunda expressão scale=trunc(iw/2)*2, que não é aceita igualmente por
+    # todas as builds do FFmpeg usadas no worker.
+    return [FILTERS.get(filter_name,'null'),f'scale=-2:{height}:flags=lanczos']
+
+def _ass_filter(path):
+    # O arquivo fica no mesmo diretório temporário do job. Escapa caracteres
+    # especiais do parser de filtros do FFmpeg sem depender do shell.
+    value=path.as_posix().replace('\\','/').replace(':',r'\:').replace("'",r"\'")
+    return f"ass=filename='{value}'"
 
 def render(source,output,resolution,filter_name,captions_path=None,caption_style='none',caption_color='#FFFFFF',highlight_color='#FFFF00',caption_size=62,caption_position='bottom',auto_emphasis=True):
     height=resolution if resolution in {720,1080,2160} else 1080; filters=_video_filter(height,filter_name); ass=None
     if caption_style!='none' and captions_path and captions_path.exists():
-        captions=json.loads(captions_path.read_text(encoding='utf-8')); ass=output.with_suffix('.ass').resolve(); _write_ass(ass,captions,caption_color,highlight_color,max(28,min(96,caption_size)),caption_position,auto_emphasis); filters.append(f"ass=filename='{ass.as_posix()}'")
+        captions=json.loads(captions_path.read_text(encoding='utf-8')); ass=output.with_suffix('.ass').resolve(); _write_ass(ass,captions,caption_color,highlight_color,max(28,min(96,caption_size)),caption_position,auto_emphasis); filters.append(_ass_filter(ass))
     preset='ultrafast' if height==2160 else 'veryfast'
     cmd=['ffmpeg','-hide_banner','-loglevel','error','-y','-i',str(source),'-vf',','.join(filters),'-c:v','libx264','-pix_fmt','yuv420p','-preset',preset,'-crf','20','-c:a','aac','-b:a','192k','-movflags','+faststart',str(output)]
     try: subprocess.run(cmd,check=True)
