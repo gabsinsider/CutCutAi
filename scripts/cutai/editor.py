@@ -10,13 +10,11 @@ EMPHASIS_TERMS={"absurdo","atenção","bomba","caramba","golaço","gol","histór
 def _ass_time(seconds):
     seconds=max(0.0,float(seconds)); h=int(seconds//3600); m=int((seconds%3600)//60); s=seconds%60
     return f"{h}:{m:02d}:{s:05.2f}"
-
 def _safe(text): return str(text).replace('\\',r'\\').replace('{',r'\{').replace('}',r'\}').replace('\n',r'\N').strip()
 def _ass_color(value):
     value=value.strip().lstrip('#')
     if not re.fullmatch(r'[0-9a-fA-F]{6}',value): value='FFFFFF'
-    r,g,b=value[0:2],value[2:4],value[4:6]
-    return f"&H00{b}{g}{r}".upper()
+    r,g,b=value[0:2],value[2:4],value[4:6]; return f"&H00{b}{g}{r}".upper()
 def _emphasis(text): return bool(set(re.findall(r'[\wÀ-ÿ]+',text.lower())) & EMPHASIS_TERMS) or '!' in text
 
 def _write_ass(path,captions,color,highlight,size,position,auto_emphasis):
@@ -25,34 +23,24 @@ def _write_ass(path,captions,color,highlight,size,position,auto_emphasis):
     events=[]
     for seg in captions.get('segments',[]):
         text=_safe(seg.get('text',''))
-        if not text: continue
-        style='Emphasis' if auto_emphasis and _emphasis(text) else 'Default'
-        events.append(f"Dialogue: 0,{_ass_time(seg.get('start',0))},{_ass_time(seg.get('end',0))},{style},,0,0,0,,{text}")
+        if text: events.append(f"Dialogue: 0,{_ass_time(seg.get('start',0))},{_ass_time(seg.get('end',0))},{'Emphasis' if auto_emphasis and _emphasis(text) else 'Default'},,0,0,0,,{text}")
     path.write_text(header+'\n'.join(events)+'\n',encoding='utf-8')
-
-def _video_filter(height,filter_name):
-    # -2 já solicita ao scaler uma dimensão divisível por 2. Evitamos uma
-    # segunda expressão scale=trunc(iw/2)*2, que não é aceita igualmente por
-    # todas as builds do FFmpeg usadas no worker.
-    return [FILTERS.get(filter_name,'null'),f'scale=-2:{height}:flags=lanczos']
-
+def _video_filter(height,filter_name): return [FILTERS.get(filter_name,'null'),f'scale=-2:{height}:flags=bilinear']
 def _ass_filter(path):
-    # O arquivo fica no mesmo diretório temporário do job. Escapa caracteres
-    # especiais do parser de filtros do FFmpeg sem depender do shell.
-    value=path.as_posix().replace('\\','/').replace(':',r'\:').replace("'",r"\'")
-    return f"ass=filename='{value}'"
+    value=path.as_posix().replace('\\','/').replace(':',r'\:').replace("'",r"\'"); return f"ass=filename='{value}'"
 
 def render(source,output,resolution,filter_name,captions_path=None,caption_style='none',caption_color='#FFFFFF',highlight_color='#FFFF00',caption_size=62,caption_position='bottom',auto_emphasis=True):
     height=resolution if resolution in {720,1080,2160} else 1080; filters=_video_filter(height,filter_name); ass=None
     if caption_style!='none' and captions_path and captions_path.exists():
         captions=json.loads(captions_path.read_text(encoding='utf-8')); ass=output.with_suffix('.ass').resolve(); _write_ass(ass,captions,caption_color,highlight_color,max(28,min(96,caption_size)),caption_position,auto_emphasis); filters.append(_ass_filter(ass))
-    preset='ultrafast' if height==2160 else 'veryfast'
-    cmd=['ffmpeg','-hide_banner','-loglevel','error','-y','-i',str(source),'-vf',','.join(filters),'-c:v','libx264','-pix_fmt','yuv420p','-preset',preset,'-crf','20','-c:a','aac','-b:a','192k','-movflags','+faststart',str(output)]
+    # Railway roda captura/análise no mesmo worker. x264 automático pode abrir
+    # muitos threads e buffers simultâneos e o kernel encerra o FFmpeg com
+    # SIGKILL (9). Um thread + ultrafast mantém a exportação dentro do limite
+    # de memória sem reduzir a resolução solicitada.
+    cmd=['ffmpeg','-hide_banner','-loglevel','error','-y','-threads','1','-filter_threads','1','-filter_complex_threads','1','-i',str(source),'-vf',','.join(filters),'-c:v','libx264','-threads:v','1','-pix_fmt','yuv420p','-preset','ultrafast','-crf','21','-c:a','aac','-threads:a','1','-b:a','160k','-movflags','+faststart',str(output)]
     try: subprocess.run(cmd,check=True)
     finally:
         if ass: ass.unlink(missing_ok=True)
-
 def main():
-    p=argparse.ArgumentParser(); p.add_argument('--source',type=Path,required=True); p.add_argument('--output',type=Path,required=True); p.add_argument('--resolution',type=int,default=1080); p.add_argument('--filter',default='none'); p.add_argument('--captions',type=Path); p.add_argument('--caption-style',default='none'); p.add_argument('--caption-color',default='#FFFFFF'); p.add_argument('--highlight-color',default='#FFFF00'); p.add_argument('--caption-size',type=int,default=62); p.add_argument('--caption-position',choices=['top','center','bottom'],default='bottom'); p.add_argument('--auto-emphasis',choices=['yes','no'],default='yes'); a=p.parse_args()
-    render(a.source,a.output,a.resolution,a.filter,a.captions,a.caption_style,a.caption_color,a.highlight_color,a.caption_size,a.caption_position,a.auto_emphasis=='yes'); print(json.dumps({'output':str(a.output),'resolution':a.resolution,'filter':a.filter,'captions':a.caption_style!='none'}))
+    p=argparse.ArgumentParser(); p.add_argument('--source',type=Path,required=True); p.add_argument('--output',type=Path,required=True); p.add_argument('--resolution',type=int,default=1080); p.add_argument('--filter',default='none'); p.add_argument('--captions',type=Path); p.add_argument('--caption-style',default='none'); p.add_argument('--caption-color',default='#FFFFFF'); p.add_argument('--highlight-color',default='#FFFF00'); p.add_argument('--caption-size',type=int,default=62); p.add_argument('--caption-position',choices=['top','center','bottom'],default='bottom'); p.add_argument('--auto-emphasis',choices=['yes','no'],default='yes'); a=p.parse_args(); render(a.source,a.output,a.resolution,a.filter,a.captions,a.caption_style,a.caption_color,a.highlight_color,a.caption_size,a.caption_position,a.auto_emphasis=='yes'); print(json.dumps({'output':str(a.output),'resolution':a.resolution,'filter':a.filter,'captions':a.caption_style!='none'}))
 if __name__=='__main__': main()
