@@ -39,12 +39,11 @@ def _export_reap():
     removed=0;freed=0
     for jid,job in list(_export_jobs.items()):
         if job.get("status")!="ready":continue
-        path=EXPORT_ROOT/f"{jid}.mp4"
-        rel=_release_tag(f"export-{jid}")
+        path=EXPORT_ROOT/f"{jid}.mp4";rel=_release_tag(f"export-{jid}")
         if not rel:continue
         asset=next((a for a in rel.get("assets",[]) if a.get("name")==f"{jid}.mp4" and a.get("browser_download_url")),None)
         if not asset:continue
-        remote=str(asset["browser_download_url"]);job.update({"status":"archived","url":remote,"archived_at":datetime.now(UTC).isoformat(),"archive_tag":f"export-{jid}"})
+        job.update({"status":"archived","url":str(asset["browser_download_url"]),"archived_at":datetime.now(UTC).isoformat(),"archive_tag":f"export-{jid}"})
         if path.exists():
             try:freed+=path.stat().st_size;path.unlink();removed+=1
             except OSError:pass
@@ -95,8 +94,12 @@ def _run_export(job_id,cid,opts):
             except Exception:pass
         cmd=[sys.executable,"-m","cutai.editor","--source",str(source),"--output",str(out),"--filter",opts["filter"],"--resolution",str(opts["resolution"]),"--caption-style",opts["caption_style"],"--caption-color",opts["caption_color"],"--highlight-color",opts["highlight_color"],"--caption-position",opts["position"],"--caption-size",str(opts["size"]),"--auto-emphasis","yes" if opts["emphasis"] else "no"]
         if captions.exists():cmd += ["--captions",str(captions)]
-        subprocess.run(cmd,check=True,timeout=1800);job.update({"status":"ready","finished_at":datetime.now(UTC).isoformat(),"url":f"/exports/{job_id}.mp4"})
-    except Exception as exc:out.unlink(missing_ok=True);job.update({"status":"failed","error":str(exc)[:300],"finished_at":datetime.now(UTC).isoformat()})
+        proc=subprocess.run(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=1800)
+        if proc.returncode!=0:
+            detail=(proc.stderr or proc.stdout or "renderização falhou").strip();detail=" | ".join(detail.splitlines()[-8:])
+            raise RuntimeError(f"FFmpeg/editor: {detail[-1200:]}")
+        job.update({"status":"ready","finished_at":datetime.now(UTC).isoformat(),"url":f"/exports/{job_id}.mp4"})
+    except Exception as exc:out.unlink(missing_ok=True);job.update({"status":"failed","error":str(exc)[:1400],"finished_at":datetime.now(UTC).isoformat()});print(f"[export] {job_id} falhou: {exc}",flush=True)
     finally:base.shutil.rmtree(tmp,ignore_errors=True)
 def _new_export(data):
     cid=str(data.get("clip_id","")).strip()
