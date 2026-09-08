@@ -5,9 +5,33 @@ from datetime import UTC,datetime
 from pathlib import Path
 from urllib.parse import urlparse
 from . import worker_api as base
-ROOT=base.ROOT;ARCHIVED=ROOT/"archived-ranking.json";EXPORT_ROOT=ROOT/"exports";REPO="gabsinsider/CutCutAi"
+ROOT=base.ROOT;ARCHIVED=ROOT/"archived-ranking.json";EXPORT_ROOT=ROOT/"exports";EXPORT_STATE=ROOT/"export-jobs.json";REPO="gabsinsider/CutCutAi"
 _original_ranking=base._ranking;_original_cleanup=base._cleanup_storage;_original_do_get=base.Handler.do_GET;_original_do_post=base.Handler.do_POST
-_export_lock=threading.Lock();_export_jobs={}
+_export_lock=threading.Lock()
+def _load_export_jobs():
+    try:
+        rows=json.loads(EXPORT_STATE.read_text(encoding="utf-8")).get("jobs",[])
+        return {str(x.get("id")):dict(x) for x in rows if x.get("id")}
+    except (OSError,ValueError,TypeError):return {}
+_export_jobs=_load_export_jobs()
+def _save_export_jobs():
+    with _export_lock:
+        rows=list(_export_jobs.values())[-100:]
+        base._write_json(EXPORT_STATE,{"jobs":rows})
+def _update_job(jid,values):
+    with _export_lock:_export_jobs[jid].update(values)
+    _save_export_jobs()
+def _recover_export_jobs():
+    changed=False
+    for jid,job in list(_export_jobs.items()):
+        if job.get("status")!='processing':continue
+        path=EXPORT_ROOT/f"{jid}.mp4"
+        if path.exists() and path.stat().st_size>1024:
+            job.update({"status":"ready","url":f"/exports/{jid}.mp4","recovered_at":datetime.now(UTC).isoformat()})
+        else:
+            job.update({"status":"failed","error":"A exportação foi interrompida por uma reinicialização do worker. Tente novamente.","finished_at":datetime.now(UTC).isoformat()})
+        changed=True
+    if changed:_save_export_jobs()
 def _load_archived():
     try:return json.loads(ARCHIVED.read_text(encoding="utf-8")).get("clips",[])
     except (OSError,ValueError,TypeError):return []
@@ -36,17 +60,18 @@ def _archive_reap():
     if removed:_save_archived(list(archived.values()));print(f"[archive-reaper] {removed} arquivo(s) removidos; {freed/1048576:.1f} MiB liberados",flush=True)
     return removed
 def _export_reap():
-    removed=0;freed=0
+    removed=0;freed=0;changed=False
     for jid,job in list(_export_jobs.items()):
         if job.get("status")!="ready":continue
         path=EXPORT_ROOT/f"{jid}.mp4";rel=_release_tag(f"export-{jid}")
         if not rel:continue
         asset=next((a for a in rel.get("assets",[]) if a.get("name")==f"{jid}.mp4" and a.get("browser_download_url")),None)
         if not asset:continue
-        job.update({"status":"archived","url":str(asset["browser_download_url"]),"archived_at":datetime.now(UTC).isoformat(),"archive_tag":f"export-{jid}"})
+        job.update({"status":"archived","url":str(asset["browser_download_url"]),"archived_at":datetime.now(UTC).isoformat(),"archive_tag":f"export-{jid}"});changed=True
         if path.exists():
             try:freed+=path.stat().st_size;path.unlink();removed+=1
             except OSError:pass
+    if changed:_save_export_jobs()
     if removed:print(f"[export-reaper] {removed} exportação(ões) removida(s); {freed/1048576:.1f} MiB liberados",flush=True)
     return removed
 def _ranking(handler=None):
@@ -98,8 +123,8 @@ def _run_export(job_id,cid,opts):
         if proc.returncode!=0:
             detail=(proc.stderr or proc.stdout or "renderização falhou").strip();detail=" | ".join(detail.splitlines()[-8:])
             raise RuntimeError(f"FFmpeg/editor: {detail[-1200:]}")
-        job.update({"status":"ready","finished_at":datetime.now(UTC).isoformat(),"url":f"/exports/{job_id}.mp4"})
-    except Exception as exc:out.unlink(missing_ok=True);job.update({"status":"failed","error":str(exc)[:1400],"finished_at":datetime.now(UTC).isoformat()});print(f"[export] {job_id} falhou: {exc}",flush=True)
+        _update_job(job_id,{"status":"ready","finished_at":datetime.now(UTC).isoformat(),"url":f"/exports/{job_id}.mp4"})
+    except Exception as exc:out.unlink(missing_ok=True);_update_job(job_id,{"status":"failed","error":str(exc)[:1400],"finished_at":datetime.now(UTC).isoformat()});print(f"[export] {job_id} falhou: {exc}",flush=True)
     finally:base.shutil.rmtree(tmp,ignore_errors=True)
 def _new_export(data):
     cid=str(data.get("clip_id","")).strip()
@@ -113,7 +138,7 @@ def _new_export(data):
     if not re.fullmatch(r"#[0-9a-fA-F]{6}",opts["highlight_color"]):opts["highlight_color"]="#FFFF00"
     opts["size"]=max(40,min(90,opts["size"]));job_id=f"{cid}-{int(time.time())}";job={"id":job_id,"clip_id":cid,"status":"processing","created_at":datetime.now(UTC).isoformat()}
     with _export_lock:_export_jobs[job_id]=job
-    threading.Thread(target=_run_export,args=(job_id,cid,opts),daemon=True,name=f"export-{cid}").start();return job
+    _save_export_jobs();threading.Thread(target=_run_export,args=(job_id,cid,opts),daemon=True,name=f"export-{cid}").start();return job
 def _do_get(self):
     p=urlparse(self.path).path
     if p=="/diagnostics":self._send(200,_diagnostics());return
@@ -131,5 +156,5 @@ def _do_post(self):
     try:size=min(int(self.headers.get("Content-Length","0")),16384);data=json.loads(self.rfile.read(size) or b"{}");self._send(202,_new_export(data))
     except (ValueError,TypeError,json.JSONDecodeError) as exc:self._send(400,{"ok":False,"error":str(exc)});return
     except Exception as exc:self._send(500,{"ok":False,"error":str(exc)[:300]});return
-EXPORT_ROOT.mkdir(parents=True,exist_ok=True);base._ranking=_ranking;base._maintenance_loop=_maintenance_loop;base.Handler.do_GET=_do_get;base.Handler.do_POST=_do_post
+EXPORT_ROOT.mkdir(parents=True,exist_ok=True);_recover_export_jobs();base._ranking=_ranking;base._maintenance_loop=_maintenance_loop;base.Handler.do_GET=_do_get;base.Handler.do_POST=_do_post
 if __name__=="__main__":base.main()
