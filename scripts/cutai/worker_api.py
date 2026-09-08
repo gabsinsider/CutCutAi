@@ -5,7 +5,7 @@ from datetime import UTC,datetime
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote,urlparse
-ROOT=Path(os.getenv("CUTAI_DATA_ROOT","/data/cutcutai"));PORT=int(os.getenv("PORT","8080"));_lock=threading.Lock();_process=None;_current_url=None;_session_id=None
+ROOT=Path(os.getenv("CUTAI_DATA_ROOT","/data/cutcutai"));PORT=int(os.getenv("PORT","8080"));_lock=threading.Lock();_process=None;_current_url=None;_session_id=None;_intentional_stop=False
 
 def _session(url):return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")+"-"+hashlib.sha1(url.encode()).hexdigest()[:8]
 def _session_root():return ROOT/"sessions"/str(_session_id) if _session_id else None
@@ -22,15 +22,12 @@ def _storage_stats():
     except OSError:return {}
 def _cleanup_storage():
     """Libera somente temporários/buffers órfãos; nunca MP4/JPG/captions finais."""
-    removed=0;freed=0;sessions=ROOT/"sessions"
-    roots=[p for p in sessions.iterdir() if p.is_dir()] if sessions.exists() else []
-    legacy=ROOT/"continuous-live"
+    removed=0;freed=0;sessions=ROOT/"sessions";roots=[p for p in sessions.iterdir() if p.is_dir()] if sessions.exists() else [];legacy=ROOT/"continuous-live"
     if legacy.exists():roots.append(legacy)
     active=[]
     for root in roots:
         meta=_read_json(root/"session.json")
-        if meta.get("status")=="active" and _valid_url(str(meta.get("url",""))):
-            stamp=str(meta.get("last_started_at") or meta.get("resumed_at") or meta.get("started_at") or "");active.append((stamp,root))
+        if meta.get("status")=="active" and _valid_url(str(meta.get("url",""))):active.append((str(meta.get("last_started_at") or meta.get("resumed_at") or meta.get("started_at") or ""),root))
     keep_active=max(active,key=lambda x:x[0])[1] if active else None
     for root in roots:
         for pattern in ("window-*.mkv","window-*.txt","completed.csv"):
@@ -39,10 +36,7 @@ def _cleanup_storage():
         if purge_stream and stream.exists():
             for pattern in ("segment-*.mkv","segment-*.mkv.part","segment-*.part"):
                 for p in stream.glob(pattern):n,b=_safe_unlink(p);removed+=n;freed+=b
-            if meta.get("status")=="active" and root!=keep_active:
-                meta.update({"status":"orphaned","orphaned_at":datetime.now(UTC).isoformat()})
-                try:_write_json(root/"session.json",meta)
-                except OSError:pass
+            if meta.get("status")=="active" and root!=keep_active:meta.update({"status":"orphaned","orphaned_at":datetime.now(UTC).isoformat()});_write_json(root/"session.json",meta)
     temp=Path(os.getenv("CUTAI_WINDOW_ROOT","/tmp/cutcutai-windows"))
     if temp.exists():
         for pattern in ("window-*.mkv","window-*.txt"):
@@ -50,6 +44,22 @@ def _cleanup_storage():
     stats=_storage_stats()
     if removed or stats:print(f"[worker-api] armazenamento: limpeza={removed} arquivo(s), liberados={freed/1048576:.1f} MiB, livre={stats.get('free_mb','?')} MiB, usado={stats.get('used_percent','?')}%",flush=True)
     return removed,freed
+def _supervisor_log_tail(root,limit=80):
+    try:return (root/"supervisor.log").read_text(encoding="utf-8",errors="replace").splitlines()[-limit:]
+    except OSError:return []
+def _record_exit(root,code,reason):
+    meta=_read_json(root/"session.json");meta.update({"last_supervisor_exit":code,"last_supervisor_exit_at":datetime.now(UTC).isoformat(),"last_supervisor_exit_reason":reason,"last_supervisor_log":_supervisor_log_tail(root,30)});_write_json(root/"session.json",meta)
+def _watch_supervisor(proc,url,sid):
+    global _process
+    code=proc.wait();root=ROOT/"sessions"/sid
+    with _lock:
+        if proc is not _process:return
+        reason="intentional_stop" if _intentional_stop else "unexpected_exit";_record_exit(root,code,reason)
+        if _intentional_stop:return
+        meta=_read_json(root/"session.json")
+        if meta.get("status")=="active" and _valid_url(url):
+            attempts=int(meta.get("supervisor_auto_restarts",0))+1;meta.update({"supervisor_auto_restarts":attempts,"last_auto_restart_at":datetime.now(UTC).isoformat()});_write_json(root/"session.json",meta)
+            print(f"[worker-api] supervisor saiu com {code}; reinício automático #{attempts}",flush=True);time.sleep(min(30,3+attempts*2));_launch(url,sid)
 def _maintenance_loop():
     interval=max(15,int(os.getenv("CUTAI_STORAGE_CHECK_SECONDS","30")))
     while True:
@@ -57,16 +67,16 @@ def _maintenance_loop():
         try:_cleanup_storage()
         except Exception as exc:print(f"[worker-api] manutenção de armazenamento falhou: {type(exc).__name__}: {exc}",flush=True)
 def _state():
-    running=bool(_process and _process.poll() is None);root=_session_root();detail=_read_json(root/"supervisor.json") if root else {}
-    return {"ok":True,"running":running,"url":_current_url if running else None,"session_id":_session_id,"supervisor":detail,"storage":_storage_stats()}
+    running=bool(_process and _process.poll() is None);root=_session_root();detail=_read_json(root/"supervisor.json") if root else {};meta=_read_json(root/"session.json") if root else {}
+    return {"ok":True,"running":running,"url":_current_url if running else None,"session_id":_session_id,"supervisor":detail,"session":meta,"supervisor_log_tail":_supervisor_log_tail(root,40) if root else [],"storage":_storage_stats()}
 def _valid_url(v):
     try:p=urlparse(v);return p.scheme in {"http","https"} and bool(p.netloc)
     except ValueError:return False
 def _launch(url,session_id):
-    global _process,_current_url,_session_id;_session_id=session_id;root=ROOT/"sessions"/session_id;root.mkdir(parents=True,exist_ok=True);_process=subprocess.Popen([sys.executable,"-m","cutai.live_supervisor","--url",url,"--root",str(root),"--segment-seconds","30","--window-seconds","600","--overlap-seconds","90","--capture-restarts","12"]);_current_url=url
-    meta=_read_json(root/"session.json");meta.update({"id":session_id,"url":url,"status":"active","last_started_at":datetime.now(UTC).isoformat(),"resume_count":int(meta.get("resume_count",0))});_write_json(root/"session.json",meta)
+    global _process,_current_url,_session_id,_intentional_stop;_intentional_stop=False;_session_id=session_id;root=ROOT/"sessions"/session_id;root.mkdir(parents=True,exist_ok=True);log=(root/"supervisor.log").open("a",encoding="utf-8");log.write(f"\n=== launch {datetime.now(UTC).isoformat()} ===\n");log.flush();_process=subprocess.Popen([sys.executable,"-m","cutai.live_supervisor","--url",url,"--root",str(root),"--segment-seconds","30","--window-seconds","600","--overlap-seconds","90","--capture-restarts","12"],stdout=log,stderr=subprocess.STDOUT);proc=_process;_current_url=url
+    meta=_read_json(root/"session.json");meta.update({"id":session_id,"url":url,"status":"active","last_started_at":datetime.now(UTC).isoformat(),"resume_count":int(meta.get("resume_count",0)),"supervisor_pid":proc.pid});_write_json(root/"session.json",meta);threading.Thread(target=_watch_supervisor,args=(proc,url,session_id),daemon=True,name=f"watch-{session_id}").start()
 def _stop(mark_stopped=True):
-    global _process,_current_url;root=_session_root()
+    global _process,_current_url,_intentional_stop;root=_session_root();_intentional_stop=True
     if _process and _process.poll() is None:
         _process.send_signal(signal.SIGTERM)
         try:_process.wait(timeout=30)
@@ -76,7 +86,7 @@ def _stop(mark_stopped=True):
     _process=None;_current_url=None
     if mark_stopped:_cleanup_storage()
 def _start(url):
-    _stop();_cleanup_storage();sid=_session(url);root=ROOT/"sessions"/sid;root.mkdir(parents=True,exist_ok=True);_write_json(root/"session.json",{"id":sid,"url":url,"status":"active","started_at":datetime.now(UTC).isoformat(),"resume_count":0});_launch(url,sid)
+    _stop();_cleanup_storage();sid=_session(url);root=ROOT/"sessions"/sid;root.mkdir(parents=True,exist_ok=True);_write_json(root/"session.json",{"id":sid,"url":url,"status":"active","started_at":datetime.now(UTC).isoformat(),"resume_count":0,"supervisor_auto_restarts":0});_launch(url,sid)
 def _recover():
     sessions=ROOT/"sessions"
     if not sessions.exists():return False
@@ -117,8 +127,7 @@ def _public_base(handler=None):
 def _ranking(handler=None):
     files=_clip_files();rows=[]
     for candidate in (ROOT/"ranking.json",Path("data/ranking.json")):
-        try:
-            loaded=json.loads(candidate.read_text(encoding="utf-8")).get("clips",[]);known={str(r.get("id","")) for r in rows};rows.extend(r for r in loaded if str(r.get("id","")) not in known)
+        try:loaded=json.loads(candidate.read_text(encoding="utf-8")).get("clips",[]);known={str(r.get("id","")) for r in rows};rows.extend(r for r in loaded if str(r.get("id","")) not in known)
         except (OSError,ValueError,TypeError):pass
     by_id={str(r.get("id","")):r for r in rows};base=_public_base(handler);prefix=f"{base}/media" if base else "/media";clips=[]
     for cid,found in files.items():
@@ -177,8 +186,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     ROOT.mkdir(parents=True,exist_ok=True);_cleanup_storage()
     with _lock:_recover()
-    threading.Thread(target=_maintenance_loop,name="storage-maintenance",daemon=True).start()
-    server=ThreadingHTTPServer(("0.0.0.0",PORT),Handler);print(f"CutCutAi worker API ouvindo em 0.0.0.0:{PORT}",flush=True)
+    threading.Thread(target=_maintenance_loop,name="storage-maintenance",daemon=True).start();server=ThreadingHTTPServer(("0.0.0.0",PORT),Handler);print(f"CutCutAi worker API ouvindo em 0.0.0.0:{PORT}",flush=True)
     try:server.serve_forever()
     except KeyboardInterrupt:pass
     finally:
