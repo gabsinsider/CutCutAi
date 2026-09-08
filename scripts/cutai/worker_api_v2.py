@@ -26,12 +26,17 @@ def _recover_export_jobs():
     for jid,job in list(_export_jobs.items()):
         if job.get("status")!='processing':continue
         path=EXPORT_ROOT/f"{jid}.mp4"
-        if path.exists() and path.stat().st_size>1024:
-            job.update({"status":"ready","url":f"/exports/{jid}.mp4","recovered_at":datetime.now(UTC).isoformat()})
-        else:
-            job.update({"status":"failed","error":"A exportação foi interrompida por uma reinicialização do worker. Tente novamente.","finished_at":datetime.now(UTC).isoformat()})
+        if path.exists() and path.stat().st_size>1024:job.update({"status":"ready","url":f"/exports/{jid}.mp4","recovered_at":datetime.now(UTC).isoformat()})
+        else:job.update({"status":"failed","error":"A exportação foi interrompida por uma reinicialização do worker. Tente novamente.","finished_at":datetime.now(UTC).isoformat()})
         changed=True
     if changed:_save_export_jobs()
+def _exports_for_archive():
+    rows=[]
+    for job in _export_jobs.values():
+        jid=str(job.get("id","")).strip();cid=str(job.get("clip_id","")).strip();status=str(job.get("status","")).strip();url=str(job.get("url","")).strip()
+        if jid and cid and status=="ready" and url==f"/exports/{jid}.mp4" and (EXPORT_ROOT/f"{jid}.mp4").exists():rows.append({"id":jid,"clip_id":cid,"status":status,"url":url,"created_at":job.get("created_at"),"finished_at":job.get("finished_at")})
+    rows.sort(key=lambda x:str(x.get("created_at",'')))
+    return {"exports":rows,"count":len(rows)}
 def _load_archived():
     try:return json.loads(ARCHIVED.read_text(encoding="utf-8")).get("clips",[])
     except (OSError,ValueError,TypeError):return []
@@ -105,7 +110,7 @@ def _download(url,path):
             f.write(chunk)
 def _clip_row(cid):return next((x for x in _ranking(None).get("clips",[]) if str(x.get("id"))==cid),None)
 def _run_export(job_id,cid,opts):
-    job=_export_jobs[job_id];tmp=EXPORT_ROOT/f".{job_id}";tmp.mkdir(parents=True,exist_ok=True);out=EXPORT_ROOT/f"{job_id}.mp4"
+    tmp=EXPORT_ROOT/f".{job_id}";tmp.mkdir(parents=True,exist_ok=True);out=EXPORT_ROOT/f"{job_id}.mp4"
     try:
         row=_clip_row(cid);local=base._clip_files().get(cid,{})
         if not row and "asset" not in local:raise RuntimeError("corte não encontrado")
@@ -121,8 +126,7 @@ def _run_export(job_id,cid,opts):
         if captions.exists():cmd += ["--captions",str(captions)]
         proc=subprocess.run(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=1800)
         if proc.returncode!=0:
-            detail=(proc.stderr or proc.stdout or "renderização falhou").strip();detail=" | ".join(detail.splitlines()[-8:])
-            raise RuntimeError(f"FFmpeg/editor: {detail[-1200:]}")
+            detail=(proc.stderr or proc.stdout or "renderização falhou").strip();detail=" | ".join(detail.splitlines()[-8:]);raise RuntimeError(f"FFmpeg/editor: {detail[-1200:]}")
         _update_job(job_id,{"status":"ready","finished_at":datetime.now(UTC).isoformat(),"url":f"/exports/{job_id}.mp4"})
     except Exception as exc:out.unlink(missing_ok=True);_update_job(job_id,{"status":"failed","error":str(exc)[:1400],"finished_at":datetime.now(UTC).isoformat()});print(f"[export] {job_id} falhou: {exc}",flush=True)
     finally:base.shutil.rmtree(tmp,ignore_errors=True)
@@ -142,6 +146,7 @@ def _new_export(data):
 def _do_get(self):
     p=urlparse(self.path).path
     if p=="/diagnostics":self._send(200,_diagnostics());return
+    if p=="/archive/exports":self._send(200,_exports_for_archive());return
     if p.startswith("/edit/status/"):
         jid=Path(p).name;job=_export_jobs.get(jid);self._send(200,job) if job else self._send(404,{"ok":False,"error":"not_found"});return
     if p.startswith("/exports/") and p.endswith(".mp4"):
