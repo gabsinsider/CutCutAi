@@ -15,9 +15,7 @@ def _load_export_jobs():
     except (OSError,ValueError,TypeError):return {}
 _export_jobs=_load_export_jobs()
 def _save_export_jobs():
-    with _export_lock:
-        rows=list(_export_jobs.values())[-100:]
-        base._write_json(EXPORT_STATE,{"jobs":rows})
+    with _export_lock:rows=list(_export_jobs.values())[-100:];base._write_json(EXPORT_STATE,{"jobs":rows})
 def _update_job(jid,values):
     with _export_lock:_export_jobs[jid].update(values)
     _save_export_jobs()
@@ -35,8 +33,7 @@ def _exports_for_archive():
     for job in _export_jobs.values():
         jid=str(job.get("id","")).strip();cid=str(job.get("clip_id","")).strip();status=str(job.get("status","")).strip();url=str(job.get("url","")).strip()
         if jid and cid and status=="ready" and url==f"/exports/{jid}.mp4" and (EXPORT_ROOT/f"{jid}.mp4").exists():rows.append({"id":jid,"clip_id":cid,"status":status,"url":url,"created_at":job.get("created_at"),"finished_at":job.get("finished_at")})
-    rows.sort(key=lambda x:str(x.get("created_at",'')))
-    return {"exports":rows,"count":len(rows)}
+    rows.sort(key=lambda x:str(x.get("created_at",'')));return {"exports":rows,"count":len(rows)}
 def _load_archived():
     try:return json.loads(ARCHIVED.read_text(encoding="utf-8")).get("clips",[])
     except (OSError,ValueError,TypeError):return []
@@ -110,9 +107,9 @@ def _download(url,path):
             f.write(chunk)
 def _clip_row(cid):return next((x for x in _ranking(None).get("clips",[]) if str(x.get("id"))==cid),None)
 def _run_export(job_id,cid,opts):
-    tmp=EXPORT_ROOT/f".{job_id}";tmp.mkdir(parents=True,exist_ok=True);out=EXPORT_ROOT/f"{job_id}.mp4"
+    tmp=EXPORT_ROOT/f".{job_id}";tmp.mkdir(parents=True,exist_ok=True);out=EXPORT_ROOT/f"{job_id}.mp4";rendered=tmp/"rendered.mp4"
     try:
-        row=_clip_row(cid);local=base._clip_files().get(cid,{})
+        out.unlink(missing_ok=True);row=_clip_row(cid);local=base._clip_files().get(cid,{})
         if not row and "asset" not in local:raise RuntimeError("corte não encontrado")
         source=tmp/f"{cid}.mp4";captions=tmp/f"{cid}.captions.json"
         if "asset" in local:base.shutil.copy2(local["asset"],source)
@@ -122,13 +119,15 @@ def _run_export(job_id,cid,opts):
         elif row and str(row.get("captions_url","")).startswith(("http://","https://")):
             try:_download(str(row["captions_url"]),captions)
             except Exception:pass
-        cmd=[sys.executable,"-m","cutai.editor","--source",str(source),"--output",str(out),"--filter",opts["filter"],"--resolution",str(opts["resolution"]),"--caption-style",opts["caption_style"],"--caption-color",opts["caption_color"],"--highlight-color",opts["highlight_color"],"--caption-position",opts["position"],"--caption-size",str(opts["size"]),"--auto-emphasis","yes" if opts["emphasis"] else "no"]
+        cmd=[sys.executable,"-m","cutai.editor","--source",str(source),"--output",str(rendered),"--filter",opts["filter"],"--resolution",str(opts["resolution"]),"--caption-style",opts["caption_style"],"--caption-color",opts["caption_color"],"--highlight-color",opts["highlight_color"],"--caption-position",opts["position"],"--caption-size",str(opts["size"]),"--auto-emphasis","yes" if opts["emphasis"] else "no"]
         if captions.exists():cmd += ["--captions",str(captions)]
         proc=subprocess.run(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=1800)
         if proc.returncode!=0:
             detail=(proc.stderr or proc.stdout or "renderização falhou").strip();detail=" | ".join(detail.splitlines()[-8:]);raise RuntimeError(f"FFmpeg/editor: {detail[-1200:]}")
-        _update_job(job_id,{"status":"ready","finished_at":datetime.now(UTC).isoformat(),"url":f"/exports/{job_id}.mp4"})
-    except Exception as exc:out.unlink(missing_ok=True);_update_job(job_id,{"status":"failed","error":str(exc)[:1400],"finished_at":datetime.now(UTC).isoformat()});print(f"[export] {job_id} falhou: {exc}",flush=True)
+        if not rendered.exists() or rendered.stat().st_size<=1024:raise RuntimeError("renderização terminou sem produzir um MP4 válido")
+        rendered.replace(out);_update_job(job_id,{"status":"ready","finished_at":datetime.now(UTC).isoformat(),"url":f"/exports/{job_id}.mp4"})
+    except Exception as exc:
+        rendered.unlink(missing_ok=True);out.unlink(missing_ok=True);_update_job(job_id,{"status":"failed","error":str(exc)[:1400],"finished_at":datetime.now(UTC).isoformat()});print(f"[export] {job_id} falhou: {exc}",flush=True)
     finally:base.shutil.rmtree(tmp,ignore_errors=True)
 def _new_export(data):
     cid=str(data.get("clip_id","")).strip()
