@@ -1,6 +1,6 @@
-"""Extensão do worker: Releases permanentes + diagnóstico público de operação."""
+"""Extensão do worker: Releases permanentes, diagnóstico e exportação direta."""
 from __future__ import annotations
-import json,time,urllib.error,urllib.request
+import json,re,subprocess,sys,threading,time,urllib.error,urllib.request
 from datetime import UTC,datetime
 from pathlib import Path
 from urllib.parse import urlparse
@@ -8,10 +8,14 @@ from . import worker_api as base
 
 ROOT=base.ROOT
 ARCHIVED=ROOT/"archived-ranking.json"
+EXPORT_ROOT=ROOT/"exports"
 REPO="gabsinsider/CutCutAi"
 _original_ranking=base._ranking
 _original_cleanup=base._cleanup_storage
 _original_do_get=base.Handler.do_GET
+_original_do_post=base.Handler.do_POST
+_export_lock=threading.Lock()
+_export_jobs={}
 
 def _load_archived():
     try:return json.loads(ARCHIVED.read_text(encoding="utf-8")).get("clips",[])
@@ -56,20 +60,72 @@ def _maintenance_loop():
             try:_archive_reap()
             except Exception as exc:print(f"[archive-reaper] falha recuperável: {type(exc).__name__}: {exc}",flush=True)
 def _diagnostics():
-    state=base._state();root=base._session_root();stream=root/"stream" if root else None
-    ready=[];parts=[]
-    if stream and stream.exists():
-        ready=sorted(stream.glob("segment-*.mkv"));parts=sorted(stream.glob("segment-*.mkv.part"))
+    state=base._state();root=base._session_root();stream=root/"stream" if root else None;ready=[];parts=[]
+    if stream and stream.exists():ready=sorted(stream.glob("segment-*.mkv"));parts=sorted(stream.glob("segment-*.mkv.part"))
     def info(p):
         try:return {"name":p.name,"size_mb":round(p.stat().st_size/1048576,2),"age_seconds":round(max(0,time.time()-p.stat().st_mtime),1)}
         except OSError:return {"name":p.name}
-    return {"ok":True,"checked_at":datetime.now(UTC).isoformat(),"deploy_commit":base.os.getenv("RAILWAY_GIT_COMMIT_SHA") or base.os.getenv("GIT_COMMIT_SHA"),"state":state,"capture":{"ready_segments":len(ready),"partial_segments":len(parts),"latest_ready":info(ready[-1]) if ready else None,"latest_partial":info(parts[-1]) if parts else None},"clips":{"local":len(base._clip_files()),"archived":len(_load_archived())}}
+    return {"ok":True,"checked_at":datetime.now(UTC).isoformat(),"deploy_commit":base.os.getenv("RAILWAY_GIT_COMMIT_SHA") or base.os.getenv("GIT_COMMIT_SHA"),"state":state,"capture":{"ready_segments":len(ready),"partial_segments":len(parts),"latest_ready":info(ready[-1]) if ready else None,"latest_partial":info(parts[-1]) if parts else None},"clips":{"local":len(base._clip_files()),"archived":len(_load_archived())},"exports":list(_export_jobs.values())[-5:]}
+def _download(url,path):
+    req=urllib.request.Request(url,headers={"User-Agent":"CutCutAi-worker"})
+    with urllib.request.urlopen(req,timeout=90) as r,path.open("wb") as f:
+        while True:
+            chunk=r.read(1048576)
+            if not chunk:break
+            f.write(chunk)
+def _clip_row(cid):return next((x for x in _ranking(None).get("clips",[]) if str(x.get("id"))==cid),None)
+def _run_export(job_id,cid,opts):
+    job=_export_jobs[job_id];tmp=EXPORT_ROOT/f".{job_id}";tmp.mkdir(parents=True,exist_ok=True);out=EXPORT_ROOT/f"{job_id}.mp4"
+    try:
+        row=_clip_row(cid)
+        if not row or not row.get("asset_url"):raise RuntimeError("corte não encontrado")
+        source=tmp/f"{cid}.mp4";captions=tmp/f"{cid}.captions.json";_download(str(row["asset_url"]),source)
+        if row.get("captions_url"):
+            try:_download(str(row["captions_url"]),captions)
+            except Exception:pass
+        cmd=[sys.executable,"-m","cutai.editor","--source",str(source),"--output",str(out),"--filter",opts["filter"],"--resolution",str(opts["resolution"]),"--caption-style",opts["caption_style"],"--caption-color",opts["caption_color"],"--highlight-color",opts["highlight_color"],"--caption-position",opts["position"],"--caption-size",str(opts["size"]),"--auto-emphasis","yes" if opts["emphasis"] else "no"]
+        if captions.exists():cmd += ["--captions",str(captions)]
+        subprocess.run(cmd,check=True,timeout=1800)
+        job.update({"status":"ready","finished_at":datetime.now(UTC).isoformat(),"url":f"/exports/{job_id}.mp4"})
+    except Exception as exc:
+        out.unlink(missing_ok=True);job.update({"status":"failed","error":str(exc)[:300],"finished_at":datetime.now(UTC).isoformat()})
+    finally:base.shutil.rmtree(tmp,ignore_errors=True)
+def _new_export(data):
+    cid=str(data.get("clip_id","")).strip()
+    if not re.fullmatch(r"[a-f0-9]{12}",cid):raise ValueError("clip_id inválido")
+    opts={"filter":str(data.get("filter","none")),"resolution":int(data.get("resolution",1080)),"caption_style":str(data.get("caption_style","none")),"caption_color":str(data.get("caption_color","#FFFFFF")),"highlight_color":str(data.get("highlight_color","#FFFF00")),"position":str(data.get("position","bottom")),"size":int(data.get("size",62)),"emphasis":bool(data.get("emphasis",True))}
+    if opts["filter"] not in {"none","vivid","cinematic","mono"}:opts["filter"]="none"
+    if opts["resolution"] not in {720,1080,2160}:opts["resolution"]=1080
+    if opts["caption_style"] not in {"none","viral","clean"}:opts["caption_style"]="none"
+    if opts["position"] not in {"top","center","bottom"}:opts["position"]="bottom"
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}",opts["caption_color"]):opts["caption_color"]="#FFFFFF"
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}",opts["highlight_color"]):opts["highlight_color"]="#FFFF00"
+    opts["size"]=max(40,min(90,opts["size"]));job_id=f"{cid}-{int(time.time())}";job={"id":job_id,"clip_id":cid,"status":"processing","created_at":datetime.now(UTC).isoformat()}
+    with _export_lock:_export_jobs[job_id]=job
+    threading.Thread(target=_run_export,args=(job_id,cid,opts),daemon=True,name=f"export-{cid}").start();return job
 def _do_get(self):
-    if urlparse(self.path).path=="/diagnostics":self._send(200,_diagnostics());return
+    p=urlparse(self.path).path
+    if p=="/diagnostics":self._send(200,_diagnostics());return
+    if p.startswith("/edit/status/"):
+        jid=Path(p).name;job=_export_jobs.get(jid);self._send(200,job) if job else self._send(404,{"ok":False,"error":"not_found"});return
+    if p.startswith("/exports/") and p.endswith(".mp4"):
+        name=Path(p).name
+        if not re.fullmatch(r"[a-f0-9]{12}-\d+\.mp4",name):self._send(404,{"ok":False,"error":"not_found"});return
+        self._send_file(EXPORT_ROOT/name);return
     return _original_do_get(self)
+def _do_post(self):
+    if urlparse(self.path).path!="/edit/export":return _original_do_post(self)
+    token=base.os.getenv("CUTAI_API_TOKEN","")
+    if token and self.headers.get("Authorization")!=f"Bearer {token}":self._send(401,{"ok":False,"error":"unauthorized"});return
+    try:
+        size=min(int(self.headers.get("Content-Length","0")),16384);data=json.loads(self.rfile.read(size) or b"{}");job=_new_export(data);self._send(202,job)
+    except (ValueError,TypeError,json.JSONDecodeError) as exc:self._send(400,{"ok":False,"error":str(exc)});return
+    except Exception as exc:self._send(500,{"ok":False,"error":str(exc)[:300]});return
 
+EXPORT_ROOT.mkdir(parents=True,exist_ok=True)
 base._ranking=_ranking
 base._maintenance_loop=_maintenance_loop
 base.Handler.do_GET=_do_get
+base.Handler.do_POST=_do_post
 
 if __name__=="__main__":base.main()
