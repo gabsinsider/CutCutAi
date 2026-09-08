@@ -26,18 +26,19 @@ def transcribe(path: Path, model_size: str | None = None) -> tuple[str, list[dic
     except ImportError:
         return "", []
 
-    # small continua disponível via WHISPER_MODEL, mas o padrão do worker contínuo
-    # precisa ser leve o bastante para CPU compartilhada. O modelo base preserva
-    # qualidade suficiente para seleção textual em português e reduz muito latência.
     model_size = model_size or os.getenv("WHISPER_MODEL", "base").strip() or "base"
     device = os.getenv("WHISPER_DEVICE", "cpu").strip() or "cpu"
     compute_type = os.getenv("WHISPER_COMPUTE_TYPE", "int8").strip() or "int8"
     model = _model(model_size, device, compute_type)
-    language = os.getenv("WHISPER_LANGUAGE", "pt").strip() or None
 
-    _log(f"iniciando transcrição de {path.name} com modelo {model_size}")
+    # Automático por padrão. Quem precisar forçar um idioma ainda pode definir
+    # WHISPER_LANGUAGE=pt/en/es/... sem alterar o pipeline.
+    language_env = os.getenv("WHISPER_LANGUAGE", "").strip()
+    language = language_env or None
+
+    _log(f"iniciando transcrição de {path.name} com modelo {model_size}; idioma={'forçado:'+language if language else 'automático'}")
     started = time.monotonic()
-    segments, _ = model.transcribe(
+    segments, info = model.transcribe(
         str(path),
         language=language,
         beam_size=int(os.getenv("WHISPER_BEAM_SIZE", "1")),
@@ -51,6 +52,12 @@ def transcribe(path: Path, model_size: str | None = None) -> tuple[str, list[dic
         temperature=0.0,
         word_timestamps=True,
     )
+
+    detected = getattr(info, "language", None)
+    probability = getattr(info, "language_probability", None)
+    if detected:
+        suffix = f" ({probability:.1%})" if isinstance(probability, (int, float)) else ""
+        _log(f"idioma {'configurado' if language else 'detectado'}: {detected}{suffix}")
 
     rows = []
     for segment in segments:
