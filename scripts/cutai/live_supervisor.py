@@ -30,7 +30,7 @@ def _probe_live(url,timeout=45):
     return "ended" if any(t in out for t in ended_terms) else "unknown"
 def run(url,root,segment=30,window=600,overlap=90,restarts=12):
     stream=root/"stream";analysis=root/"analysis";stop=root/"capture-ended";state=root/"supervisor.json";stream.mkdir(parents=True,exist_ok=True);stop.unlink(missing_ok=True)
-    shutdown=False;started_at=_now();disconnects=0;consecutive_failures=0;ended_confirmations=0;capture=None;analyzer=None;backoff=5
+    shutdown=False;started_at=_now();disconnects=0;consecutive_failures=0;ended_confirmations=0;capture=None;analyzer=None;backoff=5;ever_captured=False;first_end_seen=None
     try:proxy_enabled=bool(normalize_proxy_url(os.getenv("CUTAI_PROXY_URL","")))
     except ValueError:proxy_enabled=False
     print(f"[live-supervisor] proxy={'configurada' if proxy_enabled else 'não configurada'}",flush=True)
@@ -44,18 +44,24 @@ def run(url,root,segment=30,window=600,overlap=90,restarts=12):
             code=capture.wait();lived_for=time.monotonic()-capture_started
             if shutdown:break
             disconnects+=1
-            if lived_for>=max(30,segment):consecutive_failures=0;backoff=5
+            if lived_for>=max(30,segment):ever_captured=True;consecutive_failures=0;backoff=5
             else:consecutive_failures+=1
             probe=_probe_live(url)
-            if probe=="live":ended_confirmations=0;consecutive_failures=0;backoff=5
-            elif probe=="ended":ended_confirmations+=1
-            else:ended_confirmations=0
-            _write(state,status="checking_end" if probe=="ended" else "waiting_source" if probe=="unknown" else "reconnecting",url=url,started_at=started_at,last_disconnect=_now(),capture_exit=code,last_connection_seconds=round(lived_for,1),capture_restarts=disconnects,consecutive_failures=consecutive_failures,live_probe=probe,end_confirmations=ended_confirmations,retry_in_seconds=backoff,analyzer_pid=analyzer.pid if analyzer.poll() is None else None,proxy_enabled=proxy_enabled)
-            if ended_confirmations>=2:
+            if probe=="live":ended_confirmations=0;first_end_seen=None;consecutive_failures=0;backoff=5
+            elif probe=="ended":
+                if first_end_seen is None:first_end_seen=time.monotonic()
+                ended_confirmations+=1
+            else:ended_confirmations=0;first_end_seen=None
+            end_elapsed=(time.monotonic()-first_end_seen) if first_end_seen is not None else 0
+            _write(state,status="checking_end" if probe=="ended" else "waiting_source" if probe=="unknown" else "reconnecting",url=url,started_at=started_at,last_disconnect=_now(),capture_exit=code,last_connection_seconds=round(lived_for,1),capture_restarts=disconnects,consecutive_failures=consecutive_failures,live_probe=probe,end_confirmations=ended_confirmations,end_confirmation_seconds=round(end_elapsed,1),retry_in_seconds=backoff,analyzer_pid=analyzer.pid if analyzer.poll() is None else None,proxy_enabled=proxy_enabled)
+            # YouTube/yt-dlp pode devolver post_live/not_live transitoriamente durante
+            # reconexões. Só encerramos uma sessão que realmente capturou mídia após
+            # várias confirmações consecutivas distribuídas por pelo menos 60 segundos.
+            if ever_captured and ended_confirmations>=5 and end_elapsed>=60:
                 _write(state,status="draining",reason="live_ended",url=url,started_at=started_at,ended_at=_now(),capture_exit=code,capture_restarts=disconnects,end_confirmations=ended_confirmations,proxy_enabled=proxy_enabled);break
             if probe=="unknown":
                 backoff=min(120,max(5,backoff*2));_write(state,status="waiting_source",url=url,started_at=started_at,capture_restarts=disconnects,consecutive_failures=consecutive_failures,live_probe=probe,retry_in_seconds=backoff,analyzer_pid=analyzer.pid if analyzer.poll() is None else None,proxy_enabled=proxy_enabled);time.sleep(backoff);continue
-            delay=8 if probe=="ended" else min(20,2+consecutive_failures*3);time.sleep(delay)
+            delay=15 if probe=="ended" else min(20,2+consecutive_failures*3);time.sleep(delay)
         stop.touch()
         if analyzer and analyzer.poll() is None:
             try:analyzer.wait(timeout=max(180,window*2))
