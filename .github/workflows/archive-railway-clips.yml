@@ -20,13 +20,13 @@ jobs:
   archive:
     runs-on: ubuntu-latest
     steps:
-      - name: Buscar ranking e exportações do worker
+      - name: Buscar ranking e fila de exportações do worker
         env:
           WORKER: https://cutcutai-production.up.railway.app
         run: |
           set -euo pipefail
           curl --fail --retry 3 "$WORKER/ranking" -o ranking.json
-          curl --fail --retry 3 "$WORKER/diagnostics" -o diagnostics.json
+          curl --fail --retry 3 "$WORKER/archive/exports" -o exports.json
           python3 - <<'PY'
           import json
           data=json.load(open('ranking.json',encoding='utf-8'))
@@ -38,15 +38,13 @@ jobs:
                   captions=str(c.get('captions_url','')).strip()
                   if cid and asset.startswith('https://cutcutai-production.up.railway.app/'):
                       f.write('\t'.join([cid,asset,thumb,captions])+'\n')
-          diag=json.load(open('diagnostics.json',encoding='utf-8'))
+          queue=json.load(open('exports.json',encoding='utf-8'))
           with open('exports.tsv','w',encoding='utf-8') as f:
-              for e in diag.get('exports',[]):
-                  jid=str(e.get('id','')).strip(); cid=str(e.get('clip_id','')).strip(); status=str(e.get('status',''))
-                  url=str(e.get('url','')).strip()
-                  if jid and cid and status=='ready' and url.startswith('/exports/'):
-                      f.write('\t'.join([jid,cid,url])+'\n')
+              for e in queue.get('exports',[]):
+                  jid=str(e.get('id','')).strip();cid=str(e.get('clip_id','')).strip();url=str(e.get('url','')).strip()
+                  if jid and cid and url==f'/exports/{jid}.mp4':f.write('\t'.join([jid,cid,url])+'\n')
           print(f"cortes locais encontrados: {sum(1 for _ in open('clips.tsv',encoding='utf-8'))}")
-          print(f"exportações prontas encontradas: {sum(1 for _ in open('exports.tsv',encoding='utf-8'))}")
+          print(f"exportações pendentes de arquivo: {sum(1 for _ in open('exports.tsv',encoding='utf-8'))}")
           PY
 
       - name: Arquivar arquivos locais em Releases
@@ -58,10 +56,7 @@ jobs:
           while IFS=$'\t' read -r cid asset thumb captions; do
             [ -n "$cid" ] || continue
             tag="liveclip-$cid"
-            if gh release view "$tag" --repo "$GH_REPO" >/dev/null 2>&1; then
-              echo "$cid já arquivado"
-              continue
-            fi
+            if gh release view "$tag" --repo "$GH_REPO" >/dev/null 2>&1; then echo "$cid já arquivado"; continue; fi
             mkdir -p "archive/$cid"
             curl --fail --retry 3 "$asset" -o "archive/$cid/$cid.mp4"
             files=("archive/$cid/$cid.mp4")
@@ -69,7 +64,6 @@ jobs:
             if [ -n "${captions:-}" ]; then curl --fail --retry 2 "$captions" -o "archive/$cid/$cid.captions.json" && files+=("archive/$cid/$cid.captions.json") || true; fi
             gh release create "$tag" "${files[@]}" --repo "$GH_REPO" --title "CutCutAi · Live · $cid" --notes "Corte limpo arquivado automaticamente pelo worker contínuo."
             rm -rf "archive/$cid"
-            echo "$cid arquivado em $tag"
           done < clips.tsv
 
       - name: Arquivar exportações do editor
@@ -82,14 +76,9 @@ jobs:
           while IFS=$'\t' read -r jid cid url; do
             [ -n "$jid" ] || continue
             tag="export-$jid"
-            if gh release view "$tag" --repo "$GH_REPO" >/dev/null 2>&1; then
-              echo "$jid já arquivada"
-              continue
-            fi
+            if gh release view "$tag" --repo "$GH_REPO" >/dev/null 2>&1; then echo "$jid já arquivada"; continue; fi
             mkdir -p "exports/$jid"
-            file="$jid.mp4"
-            curl --fail --retry 3 "$WORKER$url" -o "exports/$jid/$file"
-            gh release create "$tag" "exports/$jid/$file" --repo "$GH_REPO" --title "CutCutAi · Exportação · $cid" --notes "Exportação criada diretamente no editor do CutCutAi. O corte original permanece inalterado."
+            curl --fail --retry 3 "$WORKER$url" -o "exports/$jid/$jid.mp4"
+            gh release create "$tag" "exports/$jid/$jid.mp4" --repo "$GH_REPO" --title "CutCutAi · Exportação · $cid" --notes "Exportação criada diretamente no editor do CutCutAi. O corte original permanece inalterado."
             rm -rf "exports/$jid"
-            echo "$jid arquivada em $tag"
           done < exports.tsv
