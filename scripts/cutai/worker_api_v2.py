@@ -5,24 +5,15 @@ from datetime import UTC,datetime
 from pathlib import Path
 from urllib.parse import urlparse
 from . import worker_api as base
-
-ROOT=base.ROOT
-ARCHIVED=ROOT/"archived-ranking.json"
-EXPORT_ROOT=ROOT/"exports"
-REPO="gabsinsider/CutCutAi"
-_original_ranking=base._ranking
-_original_cleanup=base._cleanup_storage
-_original_do_get=base.Handler.do_GET
-_original_do_post=base.Handler.do_POST
-_export_lock=threading.Lock()
-_export_jobs={}
-
+ROOT=base.ROOT;ARCHIVED=ROOT/"archived-ranking.json";EXPORT_ROOT=ROOT/"exports";REPO="gabsinsider/CutCutAi"
+_original_ranking=base._ranking;_original_cleanup=base._cleanup_storage;_original_do_get=base.Handler.do_GET;_original_do_post=base.Handler.do_POST
+_export_lock=threading.Lock();_export_jobs={}
 def _load_archived():
     try:return json.loads(ARCHIVED.read_text(encoding="utf-8")).get("clips",[])
     except (OSError,ValueError,TypeError):return []
 def _save_archived(rows):base._write_json(ARCHIVED,{"clips":rows})
-def _release(cid):
-    req=urllib.request.Request(f"https://api.github.com/repos/{REPO}/releases/tags/liveclip-{cid}",headers={"Accept":"application/vnd.github+json","User-Agent":"CutCutAi-worker"})
+def _release_tag(tag):
+    req=urllib.request.Request(f"https://api.github.com/repos/{REPO}/releases/tags/{tag}",headers={"Accept":"application/vnd.github+json","User-Agent":"CutCutAi-worker"})
     try:
         with urllib.request.urlopen(req,timeout=12) as r:return json.load(r)
     except (urllib.error.HTTPError,urllib.error.URLError,TimeoutError,ValueError):return None
@@ -31,7 +22,7 @@ def _archive_reap():
     for row in local:
         cid=str(row.get("id","")).strip();found=files.get(cid,{})
         if not cid or "asset" not in found:continue
-        rel=_release(cid)
+        rel=_release_tag(f"liveclip-{cid}")
         if not rel:continue
         assets={str(a.get("name","")):str(a.get("browser_download_url","")) for a in rel.get("assets",[]) if a.get("browser_download_url")};mp4=assets.get(f"{cid}.mp4")
         if not mp4:continue
@@ -43,6 +34,21 @@ def _archive_reap():
             try:freed+=path.stat().st_size;path.unlink();removed+=1
             except OSError:pass
     if removed:_save_archived(list(archived.values()));print(f"[archive-reaper] {removed} arquivo(s) removidos; {freed/1048576:.1f} MiB liberados",flush=True)
+    return removed
+def _export_reap():
+    removed=0;freed=0
+    for jid,job in list(_export_jobs.items()):
+        if job.get("status")!="ready":continue
+        path=EXPORT_ROOT/f"{jid}.mp4"
+        rel=_release_tag(f"export-{jid}")
+        if not rel:continue
+        asset=next((a for a in rel.get("assets",[]) if a.get("name")==f"{jid}.mp4" and a.get("browser_download_url")),None)
+        if not asset:continue
+        remote=str(asset["browser_download_url"]);job.update({"status":"archived","url":remote,"archived_at":datetime.now(UTC).isoformat(),"archive_tag":f"export-{jid}"})
+        if path.exists():
+            try:freed+=path.stat().st_size;path.unlink();removed+=1
+            except OSError:pass
+    if removed:print(f"[export-reaper] {removed} exportação(ões) removida(s); {freed/1048576:.1f} MiB liberados",flush=True)
     return removed
 def _ranking(handler=None):
     current=_original_ranking(handler).get("clips",[]);merged={str(x.get("id")):dict(x) for x in _load_archived()}
@@ -57,7 +63,7 @@ def _maintenance_loop():
         archive_tick+=interval
         if archive_tick>=60:
             archive_tick=0
-            try:_archive_reap()
+            try:_archive_reap();_export_reap()
             except Exception as exc:print(f"[archive-reaper] falha recuperável: {type(exc).__name__}: {exc}",flush=True)
 def _diagnostics():
     state=base._state();root=base._session_root();stream=root/"stream" if root else None;ready=[];parts=[]
@@ -65,7 +71,7 @@ def _diagnostics():
     def info(p):
         try:return {"name":p.name,"size_mb":round(p.stat().st_size/1048576,2),"age_seconds":round(max(0,time.time()-p.stat().st_mtime),1)}
         except OSError:return {"name":p.name}
-    return {"ok":True,"checked_at":datetime.now(UTC).isoformat(),"deploy_commit":base.os.getenv("RAILWAY_GIT_COMMIT_SHA") or base.os.getenv("GIT_COMMIT_SHA"),"state":state,"capture":{"ready_segments":len(ready),"partial_segments":len(parts),"latest_ready":info(ready[-1]) if ready else None,"latest_partial":info(parts[-1]) if parts else None},"clips":{"local":len(base._clip_files()),"archived":len(_load_archived())},"exports":list(_export_jobs.values())[-5:]}
+    return {"ok":True,"checked_at":datetime.now(UTC).isoformat(),"deploy_commit":base.os.getenv("RAILWAY_GIT_COMMIT_SHA") or base.os.getenv("GIT_COMMIT_SHA"),"state":state,"capture":{"ready_segments":len(ready),"partial_segments":len(parts),"latest_ready":info(ready[-1]) if ready else None,"latest_partial":info(parts[-1]) if parts else None},"clips":{"local":len(base._clip_files()),"archived":len(_load_archived())},"exports":list(_export_jobs.values())[-10:]}
 def _download(url,path):
     req=urllib.request.Request(url,headers={"User-Agent":"CutCutAi-worker"})
     with urllib.request.urlopen(req,timeout=90) as r,path.open("wb") as f:
@@ -89,10 +95,8 @@ def _run_export(job_id,cid,opts):
             except Exception:pass
         cmd=[sys.executable,"-m","cutai.editor","--source",str(source),"--output",str(out),"--filter",opts["filter"],"--resolution",str(opts["resolution"]),"--caption-style",opts["caption_style"],"--caption-color",opts["caption_color"],"--highlight-color",opts["highlight_color"],"--caption-position",opts["position"],"--caption-size",str(opts["size"]),"--auto-emphasis","yes" if opts["emphasis"] else "no"]
         if captions.exists():cmd += ["--captions",str(captions)]
-        subprocess.run(cmd,check=True,timeout=1800)
-        job.update({"status":"ready","finished_at":datetime.now(UTC).isoformat(),"url":f"/exports/{job_id}.mp4"})
-    except Exception as exc:
-        out.unlink(missing_ok=True);job.update({"status":"failed","error":str(exc)[:300],"finished_at":datetime.now(UTC).isoformat()})
+        subprocess.run(cmd,check=True,timeout=1800);job.update({"status":"ready","finished_at":datetime.now(UTC).isoformat(),"url":f"/exports/{job_id}.mp4"})
+    except Exception as exc:out.unlink(missing_ok=True);job.update({"status":"failed","error":str(exc)[:300],"finished_at":datetime.now(UTC).isoformat()})
     finally:base.shutil.rmtree(tmp,ignore_errors=True)
 def _new_export(data):
     cid=str(data.get("clip_id","")).strip()
@@ -121,15 +125,8 @@ def _do_post(self):
     if urlparse(self.path).path!="/edit/export":return _original_do_post(self)
     token=base.os.getenv("CUTAI_API_TOKEN","")
     if token and self.headers.get("Authorization")!=f"Bearer {token}":self._send(401,{"ok":False,"error":"unauthorized"});return
-    try:
-        size=min(int(self.headers.get("Content-Length","0")),16384);data=json.loads(self.rfile.read(size) or b"{}");job=_new_export(data);self._send(202,job)
+    try:size=min(int(self.headers.get("Content-Length","0")),16384);data=json.loads(self.rfile.read(size) or b"{}");self._send(202,_new_export(data))
     except (ValueError,TypeError,json.JSONDecodeError) as exc:self._send(400,{"ok":False,"error":str(exc)});return
     except Exception as exc:self._send(500,{"ok":False,"error":str(exc)[:300]});return
-
-EXPORT_ROOT.mkdir(parents=True,exist_ok=True)
-base._ranking=_ranking
-base._maintenance_loop=_maintenance_loop
-base.Handler.do_GET=_do_get
-base.Handler.do_POST=_do_post
-
+EXPORT_ROOT.mkdir(parents=True,exist_ok=True);base._ranking=_ranking;base._maintenance_loop=_maintenance_loop;base.Handler.do_GET=_do_get;base.Handler.do_POST=_do_post
 if __name__=="__main__":base.main()
