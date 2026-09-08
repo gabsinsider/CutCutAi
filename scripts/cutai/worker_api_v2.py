@@ -77,10 +77,14 @@ def _clip_row(cid):return next((x for x in _ranking(None).get("clips",[]) if str
 def _run_export(job_id,cid,opts):
     job=_export_jobs[job_id];tmp=EXPORT_ROOT/f".{job_id}";tmp.mkdir(parents=True,exist_ok=True);out=EXPORT_ROOT/f"{job_id}.mp4"
     try:
-        row=_clip_row(cid)
-        if not row or not row.get("asset_url"):raise RuntimeError("corte não encontrado")
-        source=tmp/f"{cid}.mp4";captions=tmp/f"{cid}.captions.json";_download(str(row["asset_url"]),source)
-        if row.get("captions_url"):
+        row=_clip_row(cid);local=base._clip_files().get(cid,{})
+        if not row and "asset" not in local:raise RuntimeError("corte não encontrado")
+        source=tmp/f"{cid}.mp4";captions=tmp/f"{cid}.captions.json"
+        if "asset" in local:base.shutil.copy2(local["asset"],source)
+        elif row and str(row.get("asset_url","")).startswith(("http://","https://")):_download(str(row["asset_url"]),source)
+        else:raise RuntimeError("fonte do corte indisponível")
+        if "captions" in local:base.shutil.copy2(local["captions"],captions)
+        elif row and str(row.get("captions_url","")).startswith(("http://","https://")):
             try:_download(str(row["captions_url"]),captions)
             except Exception:pass
         cmd=[sys.executable,"-m","cutai.editor","--source",str(source),"--output",str(out),"--filter",opts["filter"],"--resolution",str(opts["resolution"]),"--caption-style",opts["caption_style"],"--caption-color",opts["caption_color"],"--highlight-color",opts["highlight_color"],"--caption-position",opts["position"],"--caption-size",str(opts["size"]),"--auto-emphasis","yes" if opts["emphasis"] else "no"]
