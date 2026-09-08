@@ -30,13 +30,23 @@ def _write_ass(path,captions,color,highlight,size,position,auto_emphasis):
         events.append(f"Dialogue: 0,{_ass_time(seg.get('start',0))},{_ass_time(seg.get('end',0))},{style},,0,0,0,,{text}")
     path.write_text(header+'\n'.join(events)+'\n',encoding='utf-8')
 
+def _video_filter(height,filter_name):
+    # Mantém a proporção original e garante dimensões pares para libx264.
+    # scale=-2:<altura> pode produzir largura ímpar em fontes verticais e o
+    # encoder H.264 então encerra com código 1.
+    scale=f"scale=-2:{height}:flags=lanczos,scale=trunc(iw/2)*2:trunc(ih/2)*2"
+    base=FILTERS.get(filter_name,'null')
+    return [base,scale]
+
 def render(source,output,resolution,filter_name,captions_path=None,caption_style='none',caption_color='#FFFFFF',highlight_color='#FFFF00',caption_size=62,caption_position='bottom',auto_emphasis=True):
-    height=resolution if resolution in {720,1080,2160} else 1080; filters=[FILTERS.get(filter_name,'null'),f'scale=-2:{height}']; ass=None
+    height=resolution if resolution in {720,1080,2160} else 1080; filters=_video_filter(height,filter_name); ass=None
     if caption_style!='none' and captions_path and captions_path.exists():
         captions=json.loads(captions_path.read_text(encoding='utf-8')); ass=output.with_suffix('.ass').resolve(); _write_ass(ass,captions,caption_color,highlight_color,max(28,min(96,caption_size)),caption_position,auto_emphasis); filters.append(f"ass=filename='{ass.as_posix()}'")
     preset='ultrafast' if height==2160 else 'veryfast'
-    subprocess.run(['ffmpeg','-y','-i',str(source),'-vf',','.join(filters),'-c:v','libx264','-preset',preset,'-crf','20','-c:a','aac','-b:a','192k','-movflags','+faststart',str(output)],check=True)
-    if ass: ass.unlink(missing_ok=True)
+    cmd=['ffmpeg','-hide_banner','-loglevel','error','-y','-i',str(source),'-vf',','.join(filters),'-c:v','libx264','-pix_fmt','yuv420p','-preset',preset,'-crf','20','-c:a','aac','-b:a','192k','-movflags','+faststart',str(output)]
+    try: subprocess.run(cmd,check=True)
+    finally:
+        if ass: ass.unlink(missing_ok=True)
 
 def main():
     p=argparse.ArgumentParser(); p.add_argument('--source',type=Path,required=True); p.add_argument('--output',type=Path,required=True); p.add_argument('--resolution',type=int,default=1080); p.add_argument('--filter',default='none'); p.add_argument('--captions',type=Path); p.add_argument('--caption-style',default='none'); p.add_argument('--caption-color',default='#FFFFFF'); p.add_argument('--highlight-color',default='#FFFF00'); p.add_argument('--caption-size',type=int,default=62); p.add_argument('--caption-position',choices=['top','center','bottom'],default='bottom'); p.add_argument('--auto-emphasis',choices=['yes','no'],default='yes'); a=p.parse_args()
