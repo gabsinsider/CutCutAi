@@ -54,19 +54,21 @@ def run(url,root,segment=30,window=600,overlap=90,restarts=12):
             else:ended_confirmations=0;first_end_seen=None
             end_elapsed=(time.monotonic()-first_end_seen) if first_end_seen is not None else 0
             _write(state,status="checking_end" if probe=="ended" else "waiting_source" if probe=="unknown" else "reconnecting",url=url,started_at=started_at,last_disconnect=_now(),capture_exit=code,last_connection_seconds=round(lived_for,1),capture_restarts=disconnects,consecutive_failures=consecutive_failures,live_probe=probe,end_confirmations=ended_confirmations,end_confirmation_seconds=round(end_elapsed,1),retry_in_seconds=backoff,analyzer_pid=analyzer.pid if analyzer.poll() is None else None,proxy_enabled=proxy_enabled)
-            # YouTube/yt-dlp pode devolver post_live/not_live transitoriamente durante
-            # reconexões. Só encerramos uma sessão que realmente capturou mídia após
-            # várias confirmações consecutivas distribuídas por pelo menos 60 segundos.
-            if ever_captured and ended_confirmations>=5 and end_elapsed>=60:
-                _write(state,status="draining",reason="live_ended",url=url,started_at=started_at,ended_at=_now(),capture_exit=code,capture_restarts=disconnects,end_confirmations=ended_confirmations,proxy_enabled=proxy_enabled);break
+            # O endpoint de metadados do YouTube pode sinalizar post_live/not_live mesmo
+            # durante uma transmissão ainda ativa. Para uma ferramenta de live longa,
+            # perder a sessão é pior que aguardar. Só finalizamos automaticamente após
+            # 10 minutos contínuos de confirmação de encerramento; parada manual continua
+            # imediata via /live/stop.
+            if ever_captured and ended_confirmations>=20 and end_elapsed>=600:
+                _write(state,status="draining",reason="live_ended_confirmed",url=url,started_at=started_at,ended_at=_now(),capture_exit=code,capture_restarts=disconnects,end_confirmations=ended_confirmations,end_confirmation_seconds=round(end_elapsed,1),proxy_enabled=proxy_enabled);break
             if probe=="unknown":
                 backoff=min(120,max(5,backoff*2));_write(state,status="waiting_source",url=url,started_at=started_at,capture_restarts=disconnects,consecutive_failures=consecutive_failures,live_probe=probe,retry_in_seconds=backoff,analyzer_pid=analyzer.pid if analyzer.poll() is None else None,proxy_enabled=proxy_enabled);time.sleep(backoff);continue
-            delay=15 if probe=="ended" else min(20,2+consecutive_failures*3);time.sleep(delay)
+            delay=30 if probe=="ended" else min(20,2+consecutive_failures*3);time.sleep(delay)
         stop.touch()
         if analyzer and analyzer.poll() is None:
             try:analyzer.wait(timeout=max(180,window*2))
             except subprocess.TimeoutExpired:_terminate(analyzer)
-        final="stopped" if shutdown else "finished";reason="user_stop" if shutdown else "live_ended";analyzer_exit=analyzer.poll() if analyzer else None;_write(state,status=final,reason=reason,url=url,started_at=started_at,ended_at=_now(),capture_restarts=disconnects,analyzer_exit=analyzer_exit,proxy_enabled=proxy_enabled);return 0 if analyzer_exit in (0,None) else int(analyzer_exit)
+        final="stopped" if shutdown else "finished";reason="user_stop" if shutdown else "live_ended_confirmed";analyzer_exit=analyzer.poll() if analyzer else None;_write(state,status=final,reason=reason,url=url,started_at=started_at,ended_at=_now(),capture_restarts=disconnects,analyzer_exit=analyzer_exit,proxy_enabled=proxy_enabled);return 0 if analyzer_exit in (0,None) else int(analyzer_exit)
     finally:_terminate(capture);stop.touch();_terminate(analyzer)
 def main():
     p=argparse.ArgumentParser(description="Supervisor persistente de live");p.add_argument("--url",required=True);p.add_argument("--root",type=Path,default=Path("work/continuous-live"));p.add_argument("--segment-seconds",type=int,default=30);p.add_argument("--window-seconds",type=int,default=600);p.add_argument("--overlap-seconds",type=int,default=90);p.add_argument("--capture-restarts",type=int,default=12);a=p.parse_args();raise SystemExit(run(a.url,a.root,a.segment_seconds,a.window_seconds,a.overlap_seconds,a.capture_restarts))
