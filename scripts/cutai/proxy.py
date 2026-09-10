@@ -6,15 +6,13 @@ from urllib.parse import quote, unquote, urlsplit, urlunsplit
 _SESSION_ID = os.getenv("CUTAI_PROXY_SESSION", "").strip() or secrets.token_hex(8)
 
 
-def normalize_proxy_url(raw: str) -> str:
-    """Normalize common Bright Data proxy snippets without exposing credentials."""
+def _normalize(raw: str) -> str:
     value = raw.strip().strip("'\"")
     if not value:
         return ""
     if value.startswith(("http://", "https://", "socks4://", "socks5://")):
         return value
     if "--proxy" in value:
-        # Prefer regex because mobile copy/paste can leave unmatched quotes.
         host_match = re.search(r"--proxy(?:=|\s+)[\"']?([^\s\"']+)", value)
         credentials_match = re.search(r"--proxy-user(?:=|\s+)[\"']?([^\s\"']+)", value)
         host = host_match.group(1) if host_match else ""
@@ -29,7 +27,6 @@ def normalize_proxy_url(raw: str) -> str:
         return f"http://{host}"
     if "@" in value:
         return "http://" + value
-    # Bright Data sometimes presents host:port:username:password.
     match = re.fullmatch(r"([^:]+):(\d+):([^:]+):(.+)", value)
     if match:
         host, port, user, password = match.groups()
@@ -40,20 +37,14 @@ def normalize_proxy_url(raw: str) -> str:
 
 
 def sticky_proxy_url(raw: str) -> str:
-    """Mantém o mesmo peer Bright Data durante toda a vida do worker.
-
-    Bright Data gira o peer por padrão. Para mídia assinada pelo IP (como
-    googlevideo), resolução e download precisam usar a mesma sessão/peer.
-    A senha nunca é registrada ou alterada.
-    """
-    normalized = normalize_proxy_url(raw)
+    normalized = _normalize(raw)
     if not normalized:
         return ""
     parts = urlsplit(normalized)
     host = (parts.hostname or "").lower()
     username = unquote(parts.username or "")
     password = unquote(parts.password or "")
-    if host.endswith("brightdata.com") or host.endswith("superproxy.io"):
+    if host.endswith("superproxy.io"):
         if "-session-" not in username:
             username = f"{username}-session-{_SESSION_ID}-const"
         elif not username.endswith("-const"):
@@ -68,8 +59,12 @@ def sticky_proxy_url(raw: str) -> str:
     return normalized
 
 
+def normalize_proxy_url(raw: str) -> str:
+    """Normaliza o proxy e fixa uma sessão Bright Data por processo."""
+    return sticky_proxy_url(raw)
+
+
 def proxy_session_id() -> str:
-    """ID não secreto, útil apenas para diagnóstico da sessão sticky."""
     return _SESSION_ID
 
 
