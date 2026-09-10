@@ -61,14 +61,15 @@ def _capture_command(video,audio,target,segment_seconds,start):
     pattern=target/"segment-%08d.mkv"
     return cmd+["-c","copy","-max_interleave_delta","0","-avoid_negative_ts","make_zero","-f","segment","-segment_format","matroska","-segment_time",str(segment_seconds),"-break_non_keyframes","1","-segment_start_number",str(start),"-reset_timestamps","1",str(pattern)]
 def _ytdlp_capture_command(source,target,segment_seconds,start):
-    """Mantém resolução e download no mesmo processo/proxy do yt-dlp.
-
-    Evita entregar ao FFmpeg URLs googlevideo assinadas que podem ser rejeitadas
-    quando o provedor de proxy troca o IP de saída entre conexões.
-    """
-    pattern=target/"segment-%08d.mkv";fmt="bestvideo[height<=1080][fps<=30][vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[height<=1080][fps<=30]/best"
+    """Resolve/baixa pela mesma sessão do proxy e entrega segmentação ao FFmpeg."""
+    # yt-dlp escolhe e abre a mídia com o proxy. O ffmpeg usado como downloader
+    # recebe explicitamente os mapas de entrada e o muxer de segmentos.
+    # A extensão final precisa ser .mkv: usar .part aqui faz o yt-dlp reescrever
+    # o destino e pode deixar o ffmpeg sem streams de saída.
+    pattern=target/"segment-%08d.mkv";fmt="best[height<=1080][fps<=30][ext=mp4]/best[height<=1080][fps<=30]/best"
     cmd=_resolver_base("youtube:player_client=web_safari,mweb;formats=missing_pot")
-    cmd += ["--retries","infinite","--fragment-retries","infinite","--retry-sleep","fragment:2","-f",fmt,"--downloader","ffmpeg","--downloader-args",f"ffmpeg_i:-thread_queue_size 4096 -fflags +genpts+discardcorrupt -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5", "--downloader-args",f"ffmpeg_o:-c copy -max_interleave_delta 0 -avoid_negative_ts make_zero -f segment -segment_format matroska -segment_time {segment_seconds} -break_non_keyframes 1 -segment_start_number {start} -reset_timestamps 1", "-o",str(pattern),source]
+    out_args=f"-map 0:v? -map 0:a? -c copy -max_interleave_delta 0 -avoid_negative_ts make_zero -f segment -segment_format matroska -segment_time {segment_seconds} -break_non_keyframes 1 -segment_start_number {start} -reset_timestamps 1"
+    cmd += ["--retries","infinite","--fragment-retries","infinite","--retry-sleep","fragment:2","-f",fmt,"--downloader","ffmpeg","--downloader-args","ffmpeg_i:-thread_queue_size 4096 -fflags +genpts+discardcorrupt -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5","--downloader-args",f"ffmpeg_o:{out_args}","--no-part","-o",str(pattern),source]
     return cmd
 def capture(url,output_dir,segment_seconds=30):
     validate_source_url(url)
@@ -79,8 +80,6 @@ def capture(url,output_dir,segment_seconds=30):
     if _low_disk(output_dir):print("[stream-capture] armazenamento abaixo da reserva segura; aguardando limpeza",flush=True);return 77
     proxy=_proxy();print(f"[stream-capture] iniciando captura; proxy={'configurada' if proxy else 'não configurada'}",flush=True)
     start=next_segment_number(output_dir)
-    # Com proxy, deixamos o yt-dlp resolver e abrir a mídia na mesma execução.
-    # Isso mantém a sessão de rede coerente para URLs assinadas do YouTube.
     if proxy:
         print(f"[stream-capture] modo=yt-dlp-proxy; conexão contínua a partir de {start:08d}",flush=True);cmd=_ytdlp_capture_command(url,output_dir,segment_seconds,start)
     else:
