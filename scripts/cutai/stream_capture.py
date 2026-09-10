@@ -33,7 +33,13 @@ def _media_urls(url):
     video_fmt="bestvideo[height<=1080][fps<=30][vcodec^=avc1]/bestvideo[height<=1080][fps<=30]";audio_fmt="bestaudio[acodec^=mp4a]/bestaudio"
     try:return _resolve(url,video_fmt)[0],_resolve(url,audio_fmt)[0],"adaptive"
     except (RuntimeError,IndexError):return _resolve(url,"best[height<=1080][fps<=30]/best")[0],None,"muxed"
-def _input(url):return ["-thread_queue_size","4096","-fflags","+genpts+discardcorrupt","-http_persistent","0","-http_multiple","0","-reconnect","1","-reconnect_streamed","1","-reconnect_delay_max","5","-i",url]
+def _input(url):
+    # As URLs googlevideo resolvidas pelo yt-dlp podem ser vinculadas ao IP do proxy.
+    # O FFmpeg precisa usar a mesma saída de rede; caso contrário o CDN responde 403.
+    args=["-thread_queue_size","4096","-fflags","+genpts+discardcorrupt","-http_persistent","0","-http_multiple","0","-reconnect","1","-reconnect_streamed","1","-reconnect_delay_max","5"]
+    proxy=_proxy()
+    if proxy:args += ["-http_proxy",proxy]
+    return args+["-i",url]
 def _disk(output_dir):
     try:return shutil.disk_usage(output_dir)
     except OSError:return None
@@ -54,8 +60,6 @@ def _capture_command(video,audio,target,segment_seconds,start):
     cmd=["ffmpeg","-hide_banner","-nostdin","-loglevel","warning"]+_input(video)
     if audio:cmd += _input(audio)+["-map","0:v:0","-map","1:a:0"]
     else:cmd += ["-map","0:v?","-map","0:a?"]
-    # Uma única conexão contínua evita que cada bloco volte ao mesmo ponto da playlist HLS.
-    # O muxer segment fecha os blocos dentro dessa conexão; timestamps são regenerados.
     pattern=target/"segment-%08d.mkv"
     return cmd+["-c","copy","-max_interleave_delta","0","-avoid_negative_ts","make_zero","-f","segment","-segment_format","matroska","-segment_time",str(segment_seconds),"-break_non_keyframes","1","-segment_start_number",str(start),"-reset_timestamps","1",str(pattern)]
 def capture(url,output_dir,segment_seconds=30):
@@ -77,26 +81,18 @@ def capture(url,output_dir,segment_seconds=30):
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
     try:
         while process.poll() is None:
-            if _low_disk(output_dir):
-                _disk_log(output_dir,"reserva atingida");process.terminate();return 77
-            current=sorted(output_dir.glob("segment-*.mkv"),key=segment_number)
-            # O arquivo mais novo pode ainda estar aberto. Só anunciamos os anteriores.
-            closed=current[:-1] if len(current)>1 else []
+            if _low_disk(output_dir):_disk_log(output_dir,"reserva atingida");process.terminate();return 77
+            current=sorted(output_dir.glob("segment-*.mkv"),key=segment_number);closed=current[:-1] if len(current)>1 else []
             for p in closed:
                 if p.name in seen:continue
-                if _valid_segment(p,max(5,segment_seconds*0.45)):
-                    seen.add(p.name);last_publish=time.monotonic();print(f"[stream-capture] segmento {segment_number(p):08d} publicado",flush=True)
-            if not stopping and time.monotonic()-last_publish>max(150,segment_seconds*5):
-                print("[stream-capture] watchdog: captura sem novos blocos; renovando URLs",flush=True);process.terminate();return 76
+                if _valid_segment(p,max(5,segment_seconds*0.45)):seen.add(p.name);last_publish=time.monotonic();print(f"[stream-capture] segmento {segment_number(p):08d} publicado",flush=True)
+            if not stopping and time.monotonic()-last_publish>max(150,segment_seconds*5):print("[stream-capture] watchdog: captura sem novos blocos; renovando URLs",flush=True);process.terminate();return 76
             time.sleep(2)
         return process.returncode or 0
     finally:
         if process.poll() is None:process.terminate()
 def ready_segments(output_dir,settle_seconds=2.0):
-    now=time.time();files=sorted(output_dir.glob("segment-*.mkv"),key=segment_number)
-    # Não entregar o arquivo mais novo enquanto FFmpeg ainda pode estar escrevendo nele.
-    settled=[p for p in files if segment_number(p)>=0 and now-p.stat().st_mtime>=settle_seconds]
-    return settled[:-1] if len(settled)>1 else []
+    now=time.time();files=sorted(output_dir.glob("segment-*.mkv"),key=segment_number);settled=[p for p in files if segment_number(p)>=0 and now-p.stat().st_mtime>=settle_seconds];return settled[:-1] if len(settled)>1 else []
 def main():
     p=argparse.ArgumentParser(description="Captura contínua de uma live");p.add_argument("--url",required=True);p.add_argument("--output-dir",type=Path,default=Path("work/stream"));p.add_argument("--segment-seconds",type=int,default=30);a=p.parse_args();raise SystemExit(capture(a.url,a.output_dir,a.segment_seconds))
 if __name__=="__main__":main()
