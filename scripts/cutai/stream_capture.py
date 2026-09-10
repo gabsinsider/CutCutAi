@@ -30,9 +30,9 @@ def _resolve(url,fmt):
             time.sleep(2*(attempt+1))
     raise RuntimeError(f"yt-dlp não conseguiu resolver a transmissão: {last}")
 def _media_urls(url):
-    video_fmt="bestvideo[height<=1080][fps<=30][vcodec^=avc1]/bestvideo[height<=1080][fps<=30]";audio_fmt="bestaudio[acodec^=mp4a]/bestaudio"
+    video_fmt="bestvideo[height<=1080][fps<=60][vcodec^=avc1]/bestvideo[height<=1080][fps<=60]";audio_fmt="bestaudio[acodec^=mp4a]/bestaudio"
     try:return _resolve(url,video_fmt)[0],_resolve(url,audio_fmt)[0],"adaptive"
-    except (RuntimeError,IndexError):return _resolve(url,"best[height<=1080][fps<=30]/best")[0],None,"muxed"
+    except (RuntimeError,IndexError):return _resolve(url,"best[height<=1080][fps<=60]/best")[0],None,"muxed"
 def _input(url):
     args=["-thread_queue_size","4096","-fflags","+genpts+discardcorrupt","-http_persistent","0","-http_multiple","0","-reconnect","1","-reconnect_streamed","1","-reconnect_delay_max","5"]
     proxy=_proxy()
@@ -61,12 +61,12 @@ def _capture_command(video,audio,target,segment_seconds,start):
     pattern=target/"segment-%08d.mkv"
     return cmd+["-c","copy","-max_interleave_delta","0","-avoid_negative_ts","make_zero","-f","segment","-segment_format","matroska","-segment_time",str(segment_seconds),"-break_non_keyframes","1","-segment_start_number",str(start),"-reset_timestamps","1",str(pattern)]
 def _ytdlp_capture_command(source,target,segment_seconds,start):
-    """Resolve/baixa pela mesma sessão do proxy e entrega segmentação ao FFmpeg."""
-    # yt-dlp escolhe e abre a mídia com o proxy. O ffmpeg usado como downloader
-    # recebe explicitamente os mapas de entrada e o muxer de segmentos.
-    # A extensão final precisa ser .mkv: usar .part aqui faz o yt-dlp reescrever
-    # o destino e pode deixar o ffmpeg sem streams de saída.
-    pattern=target/"segment-%08d.mkv";fmt="best[height<=1080][fps<=30][ext=mp4]/best[height<=1080][fps<=30]/best"
+    """Captura adaptativa até 1080p mantendo resolução/download na sessão do proxy."""
+    pattern=target/"segment-%08d.mkv"
+    # O fallback anterior priorizava um formato muxado (itag 18/360p). Aqui
+    # pedimos vídeo e áudio adaptativos separados, preservando a resolução
+    # original disponível até 1080p/60 sem reencode.
+    fmt="bestvideo[height<=1080][fps<=60][vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[height<=1080][fps<=60]+bestaudio/best[height<=1080][fps<=60]/best"
     cmd=_resolver_base("youtube:player_client=web_safari,mweb;formats=missing_pot")
     out_args=f"-map 0:v? -map 0:a? -c copy -max_interleave_delta 0 -avoid_negative_ts make_zero -f segment -segment_format matroska -segment_time {segment_seconds} -break_non_keyframes 1 -segment_start_number {start} -reset_timestamps 1"
     cmd += ["--retries","infinite","--fragment-retries","infinite","--retry-sleep","fragment:2","-f",fmt,"--downloader","ffmpeg","--downloader-args","ffmpeg_i:-thread_queue_size 4096 -fflags +genpts+discardcorrupt -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5","--downloader-args",f"ffmpeg_o:{out_args}","--no-part","-o",str(pattern),source]
@@ -81,7 +81,7 @@ def capture(url,output_dir,segment_seconds=30):
     proxy=_proxy();print(f"[stream-capture] iniciando captura; proxy={'configurada' if proxy else 'não configurada'}",flush=True)
     start=next_segment_number(output_dir)
     if proxy:
-        print(f"[stream-capture] modo=yt-dlp-proxy; conexão contínua a partir de {start:08d}",flush=True);cmd=_ytdlp_capture_command(url,output_dir,segment_seconds,start)
+        print(f"[stream-capture] modo=yt-dlp-proxy-adaptive-1080p; conexão contínua a partir de {start:08d}",flush=True);cmd=_ytdlp_capture_command(url,output_dir,segment_seconds,start)
     else:
         try:video,audio,mode=_media_urls(url)
         except Exception as exc:print(f"[stream-capture] falha temporária ao resolver live: {type(exc).__name__}: {exc}",flush=True);return 75
