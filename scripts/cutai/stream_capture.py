@@ -34,8 +34,6 @@ def _media_urls(url):
     try:return _resolve(url,video_fmt)[0],_resolve(url,audio_fmt)[0],"adaptive"
     except (RuntimeError,IndexError):return _resolve(url,"best[height<=1080][fps<=30]/best")[0],None,"muxed"
 def _input(url):
-    # As URLs googlevideo resolvidas pelo yt-dlp podem ser vinculadas ao IP do proxy.
-    # O FFmpeg precisa usar a mesma saída de rede; caso contrário o CDN responde 403.
     args=["-thread_queue_size","4096","-fflags","+genpts+discardcorrupt","-http_persistent","0","-http_multiple","0","-reconnect","1","-reconnect_streamed","1","-reconnect_delay_max","5"]
     proxy=_proxy()
     if proxy:args += ["-http_proxy",proxy]
@@ -62,6 +60,16 @@ def _capture_command(video,audio,target,segment_seconds,start):
     else:cmd += ["-map","0:v?","-map","0:a?"]
     pattern=target/"segment-%08d.mkv"
     return cmd+["-c","copy","-max_interleave_delta","0","-avoid_negative_ts","make_zero","-f","segment","-segment_format","matroska","-segment_time",str(segment_seconds),"-break_non_keyframes","1","-segment_start_number",str(start),"-reset_timestamps","1",str(pattern)]
+def _ytdlp_capture_command(source,target,segment_seconds,start):
+    """Mantém resolução e download no mesmo processo/proxy do yt-dlp.
+
+    Evita entregar ao FFmpeg URLs googlevideo assinadas que podem ser rejeitadas
+    quando o provedor de proxy troca o IP de saída entre conexões.
+    """
+    pattern=target/"segment-%08d.mkv";fmt="bestvideo[height<=1080][fps<=30][vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[height<=1080][fps<=30]/best"
+    cmd=_resolver_base("youtube:player_client=web_safari,mweb;formats=missing_pot")
+    cmd += ["--retries","infinite","--fragment-retries","infinite","--retry-sleep","fragment:2","-f",fmt,"--downloader","ffmpeg","--downloader-args",f"ffmpeg_i:-thread_queue_size 4096 -fflags +genpts+discardcorrupt -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5", "--downloader-args",f"ffmpeg_o:-c copy -max_interleave_delta 0 -avoid_negative_ts make_zero -f segment -segment_format matroska -segment_time {segment_seconds} -break_non_keyframes 1 -segment_start_number {start} -reset_timestamps 1", "-o",str(pattern),source]
+    return cmd
 def capture(url,output_dir,segment_seconds=30):
     validate_source_url(url)
     if segment_seconds<10 or segment_seconds>120:raise ValueError("segment_seconds deve ficar entre 10 e 120")
@@ -69,11 +77,17 @@ def capture(url,output_dir,segment_seconds=30):
     for p in output_dir.glob("*.part"):p.unlink(missing_ok=True)
     _disk_log(output_dir,"início da captura")
     if _low_disk(output_dir):print("[stream-capture] armazenamento abaixo da reserva segura; aguardando limpeza",flush=True);return 77
-    print(f"[stream-capture] resolvendo transmissão; proxy={'configurada' if _proxy() else 'não configurada'}",flush=True)
-    try:video,audio,mode=_media_urls(url)
-    except Exception as exc:print(f"[stream-capture] falha temporária ao resolver live: {type(exc).__name__}: {exc}",flush=True);return 75
-    start=next_segment_number(output_dir);print(f"[stream-capture] modo={mode}; conexão contínua a partir de {start:08d}",flush=True)
-    process=subprocess.Popen(_capture_command(video,audio,output_dir,segment_seconds,start));stopping=False;seen=set(p.name for p in output_dir.glob("segment-*.mkv"));last_publish=time.monotonic()
+    proxy=_proxy();print(f"[stream-capture] iniciando captura; proxy={'configurada' if proxy else 'não configurada'}",flush=True)
+    start=next_segment_number(output_dir)
+    # Com proxy, deixamos o yt-dlp resolver e abrir a mídia na mesma execução.
+    # Isso mantém a sessão de rede coerente para URLs assinadas do YouTube.
+    if proxy:
+        print(f"[stream-capture] modo=yt-dlp-proxy; conexão contínua a partir de {start:08d}",flush=True);cmd=_ytdlp_capture_command(url,output_dir,segment_seconds,start)
+    else:
+        try:video,audio,mode=_media_urls(url)
+        except Exception as exc:print(f"[stream-capture] falha temporária ao resolver live: {type(exc).__name__}: {exc}",flush=True);return 75
+        print(f"[stream-capture] modo={mode}; conexão contínua a partir de {start:08d}",flush=True);cmd=_capture_command(video,audio,output_dir,segment_seconds,start)
+    process=subprocess.Popen(cmd);stopping=False;seen=set(p.name for p in output_dir.glob("segment-*.mkv"));last_publish=time.monotonic()
     def stop(*_):
         nonlocal stopping
         stopping=True
@@ -86,7 +100,7 @@ def capture(url,output_dir,segment_seconds=30):
             for p in closed:
                 if p.name in seen:continue
                 if _valid_segment(p,max(5,segment_seconds*0.45)):seen.add(p.name);last_publish=time.monotonic();print(f"[stream-capture] segmento {segment_number(p):08d} publicado",flush=True)
-            if not stopping and time.monotonic()-last_publish>max(150,segment_seconds*5):print("[stream-capture] watchdog: captura sem novos blocos; renovando URLs",flush=True);process.terminate();return 76
+            if not stopping and time.monotonic()-last_publish>max(150,segment_seconds*5):print("[stream-capture] watchdog: captura sem novos blocos; renovando sessão yt-dlp",flush=True);process.terminate();return 76
             time.sleep(2)
         return process.returncode or 0
     finally:
