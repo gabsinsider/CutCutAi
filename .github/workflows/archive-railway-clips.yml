@@ -20,29 +20,39 @@ jobs:
   archive:
     runs-on: ubuntu-latest
     steps:
-      - name: Buscar ranking e fila de exportações do worker
+      - name: Buscar ranking, diagnóstico e fila de exportações do worker
         env:
           WORKER: https://cutcutai-production.up.railway.app
         run: |
           set -euo pipefail
           curl --fail --retry 3 "$WORKER/ranking" -o ranking.json
           curl --fail --retry 3 "$WORKER/archive/exports" -o exports.json
+          curl --fail --retry 3 "$WORKER/diagnostics" -o diagnostics.json || echo '{"ok":false,"diagnostics_unavailable":true}' > diagnostics.json
           python3 - <<'PY'
           import json
           data=json.load(open('ranking.json',encoding='utf-8'))
           with open('clips.tsv','w',encoding='utf-8') as f:
               for c in data.get('clips',[]):
-                  cid=str(c.get('id','')).strip()
-                  asset=str(c.get('asset_url','')).strip()
-                  thumb=str(c.get('thumbnail_url','')).strip()
-                  captions=str(c.get('captions_url','')).strip()
-                  if cid and asset.startswith('https://cutcutai-production.up.railway.app/'):
-                      f.write('\t'.join([cid,asset,thumb,captions])+'\n')
+                  cid=str(c.get('id','')).strip();asset=str(c.get('asset_url','')).strip();thumb=str(c.get('thumbnail_url','')).strip();captions=str(c.get('captions_url','')).strip()
+                  if cid and asset.startswith('https://cutcutai-production.up.railway.app/'):f.write('\t'.join([cid,asset,thumb,captions])+'\n')
           queue=json.load(open('exports.json',encoding='utf-8'))
           with open('exports.tsv','w',encoding='utf-8') as f:
               for e in queue.get('exports',[]):
                   jid=str(e.get('id','')).strip();cid=str(e.get('clip_id','')).strip();url=str(e.get('url','')).strip()
                   if jid and cid and url==f'/exports/{jid}.mp4':f.write('\t'.join([jid,cid,url])+'\n')
+          diag=json.load(open('diagnostics.json',encoding='utf-8'))
+          state=diag.get('state') or {};sup=state.get('supervisor') or {};session=state.get('session') or {};cap=diag.get('capture') or {};storage=state.get('storage') or {}
+          print('=== DIAGNOSTICO WORKER ===')
+          print('deploy_commit:',diag.get('deploy_commit'))
+          print('running:',state.get('running'),'session:',state.get('session_id'))
+          print('supervisor_status:',sup.get('status'),'capture_exit:',sup.get('capture_exit'),'probe:',sup.get('live_probe'),'restarts:',sup.get('capture_restarts'))
+          print('last_connection_seconds:',sup.get('last_connection_seconds'),'retry:',sup.get('retry_in_seconds'))
+          print('supervisor_auto_restarts:',session.get('supervisor_auto_restarts'),'last_supervisor_exit:',session.get('last_supervisor_exit'),'exit_reason:',session.get('last_supervisor_exit_reason'))
+          print('ready_segments:',cap.get('ready_segments'),'partial_segments:',cap.get('partial_segments'),'latest_ready:',cap.get('latest_ready'),'latest_partial:',cap.get('latest_partial'))
+          print('storage:',storage)
+          print('supervisor_log_tail:')
+          for line in (state.get('supervisor_log_tail') or [])[-25:]: print(line)
+          print('=== FIM DIAGNOSTICO ===')
           print(f"cortes locais encontrados: {sum(1 for _ in open('clips.tsv',encoding='utf-8'))}")
           print(f"exportações pendentes de arquivo: {sum(1 for _ in open('exports.tsv',encoding='utf-8'))}")
           PY
