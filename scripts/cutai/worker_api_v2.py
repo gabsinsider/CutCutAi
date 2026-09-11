@@ -92,13 +92,30 @@ def _maintenance_loop():
             archive_tick=0
             try:_archive_reap();_export_reap()
             except Exception as exc:print(f"[archive-reaper] falha recuperável: {type(exc).__name__}: {exc}",flush=True)
+def _media_probe(path):
+    """Metadados seguros do último bloco fechado; nunca inclui URL ou credenciais."""
+    if not path:return None
+    try:
+        proc=subprocess.run(["ffprobe","-v","error","-show_entries","stream=codec_type,codec_name,width,height,avg_frame_rate,bit_rate:format=duration,bit_rate","-of","json",str(path)],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,timeout=8)
+        if proc.returncode!=0:return None
+        data=json.loads(proc.stdout or "{}");streams=data.get("streams") or [];video=next((s for s in streams if s.get("codec_type")=="video"),{});audio=next((s for s in streams if s.get("codec_type")=="audio"),{});fmt=data.get("format") or {}
+        def fps(v):
+            try:
+                a,b=str(v or "0/1").split("/",1);return round(float(a)/float(b),2) if float(b) else None
+            except (ValueError,ZeroDivisionError):return None
+        def kbps(v):
+            try:return round(float(v)/1000)
+            except (ValueError,TypeError):return None
+        return {"width":video.get("width"),"height":video.get("height"),"fps":fps(video.get("avg_frame_rate")),"video_codec":video.get("codec_name"),"audio_codec":audio.get("codec_name"),"video_bitrate_kbps":kbps(video.get("bit_rate")),"total_bitrate_kbps":kbps(fmt.get("bit_rate")),"duration_seconds":round(float(fmt.get("duration")),2) if fmt.get("duration") else None}
+    except (OSError,subprocess.TimeoutExpired,ValueError,TypeError,json.JSONDecodeError):return None
 def _diagnostics():
     state=base._state();root=base._session_root();stream=root/"stream" if root else None;ready=[];parts=[]
     if stream and stream.exists():ready=sorted(stream.glob("segment-*.mkv"));parts=sorted(stream.glob("segment-*.mkv.part"))
     def info(p):
         try:return {"name":p.name,"size_mb":round(p.stat().st_size/1048576,2),"age_seconds":round(max(0,time.time()-p.stat().st_mtime),1)}
         except OSError:return {"name":p.name}
-    return {"ok":True,"checked_at":datetime.now(UTC).isoformat(),"deploy_commit":base.os.getenv("RAILWAY_GIT_COMMIT_SHA") or base.os.getenv("GIT_COMMIT_SHA"),"state":state,"capture":{"ready_segments":len(ready),"partial_segments":len(parts),"latest_ready":info(ready[-1]) if ready else None,"latest_partial":info(parts[-1]) if parts else None},"clips":{"local":len(base._clip_files()),"archived":len(_load_archived())},"exports":list(_export_jobs.values())[-10:]}
+    latest=ready[-1] if ready else None
+    return {"ok":True,"checked_at":datetime.now(UTC).isoformat(),"deploy_commit":base.os.getenv("RAILWAY_GIT_COMMIT_SHA") or base.os.getenv("GIT_COMMIT_SHA"),"state":state,"capture":{"ready_segments":len(ready),"partial_segments":len(parts),"latest_ready":info(latest) if latest else None,"latest_partial":info(parts[-1]) if parts else None,"media":_media_probe(latest)},"clips":{"local":len(base._clip_files()),"archived":len(_load_archived())},"exports":list(_export_jobs.values())[-10:]}
 def _download(url,path):
     req=urllib.request.Request(url,headers={"User-Agent":"CutCutAi-worker"})
     with urllib.request.urlopen(req,timeout=90) as r,path.open("wb") as f:
@@ -144,10 +161,7 @@ def _new_export(data):
     with _export_lock:_export_jobs[job_id]=job
     _save_export_jobs();threading.Thread(target=_run_export,args=(job_id,cid,opts),daemon=True,name=f"export-{cid}").start();return job
 def _browser_origin_allowed(handler):
-    """Bloqueia comandos mutáveis vindos de outros sites sem expor segredo no frontend."""
     origin=(handler.headers.get("Origin") or "").strip().rstrip("/")
-    # Sem Origin = chamada servidor-servidor/automação. O token, quando definido,
-    # continua sendo a autenticação forte para essas chamadas.
     if not origin:return True
     configured=base.os.getenv("CUTAI_ALLOWED_ORIGIN","").strip().rstrip("/")
     allowed=configured if configured and configured!="*" else OFFICIAL_WEB_ORIGIN
