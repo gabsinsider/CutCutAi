@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from . import worker_api as base
 ROOT=base.ROOT;ARCHIVED=ROOT/"archived-ranking.json";EXPORT_ROOT=ROOT/"exports";EXPORT_STATE=ROOT/"export-jobs.json";REPO="gabsinsider/CutCutAi"
+OFFICIAL_WEB_ORIGIN="https://gabsinsider.github.io"
 _original_ranking=base._ranking;_original_cleanup=base._cleanup_storage;_original_do_get=base.Handler.do_GET;_original_do_post=base.Handler.do_POST
 _export_lock=threading.Lock()
 def _load_export_jobs():
@@ -142,6 +143,15 @@ def _new_export(data):
     opts["size"]=max(40,min(90,opts["size"]));job_id=f"{cid}-{int(time.time())}";job={"id":job_id,"clip_id":cid,"status":"processing","created_at":datetime.now(UTC).isoformat()}
     with _export_lock:_export_jobs[job_id]=job
     _save_export_jobs();threading.Thread(target=_run_export,args=(job_id,cid,opts),daemon=True,name=f"export-{cid}").start();return job
+def _browser_origin_allowed(handler):
+    """Bloqueia comandos mutáveis vindos de outros sites sem expor segredo no frontend."""
+    origin=(handler.headers.get("Origin") or "").strip().rstrip("/")
+    # Sem Origin = chamada servidor-servidor/automação. O token, quando definido,
+    # continua sendo a autenticação forte para essas chamadas.
+    if not origin:return True
+    configured=base.os.getenv("CUTAI_ALLOWED_ORIGIN","").strip().rstrip("/")
+    allowed=configured if configured and configured!="*" else OFFICIAL_WEB_ORIGIN
+    return origin==allowed
 def _do_get(self):
     p=urlparse(self.path).path
     if p=="/diagnostics":self._send(200,_diagnostics());return
@@ -154,6 +164,7 @@ def _do_get(self):
         self._send_file(EXPORT_ROOT/name);return
     return _original_do_get(self)
 def _do_post(self):
+    if not _browser_origin_allowed(self):self._send(403,{"ok":False,"error":"origin_not_allowed"});return
     if urlparse(self.path).path!="/edit/export":return _original_do_post(self)
     token=base.os.getenv("CUTAI_API_TOKEN","")
     if token and self.headers.get("Authorization")!=f"Bearer {token}":self._send(401,{"ok":False,"error":"unauthorized"});return
