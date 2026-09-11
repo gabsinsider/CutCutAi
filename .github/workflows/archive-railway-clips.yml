@@ -41,7 +41,7 @@ jobs:
                   jid=str(e.get('id','')).strip();cid=str(e.get('clip_id','')).strip();url=str(e.get('url','')).strip()
                   if jid and cid and url==f'/exports/{jid}.mp4':f.write('\t'.join([jid,cid,url])+'\n')
           diag=json.load(open('diagnostics.json',encoding='utf-8'))
-          state=diag.get('state') or {};sup=state.get('supervisor') or {};session=state.get('session') or {};cap=diag.get('capture') or {};storage=state.get('storage') or {}
+          state=diag.get('state') or {};sup=state.get('supervisor') or {};session=state.get('session') or {};cap=diag.get('capture') or {};storage=state.get('storage') or {};media=cap.get('media') or {}
           print('=== DIAGNOSTICO WORKER ===')
           print('deploy_commit:',diag.get('deploy_commit'))
           print('running:',state.get('running'),'session:',state.get('session_id'))
@@ -49,6 +49,7 @@ jobs:
           print('last_connection_seconds:',sup.get('last_connection_seconds'),'retry:',sup.get('retry_in_seconds'))
           print('supervisor_auto_restarts:',session.get('supervisor_auto_restarts'),'last_supervisor_exit:',session.get('last_supervisor_exit'),'exit_reason:',session.get('last_supervisor_exit_reason'))
           print('ready_segments:',cap.get('ready_segments'),'partial_segments:',cap.get('partial_segments'),'latest_ready:',cap.get('latest_ready'),'latest_partial:',cap.get('latest_partial'))
+          print('capture_media:',media)
           print('storage:',storage)
           print('supervisor_log_tail:')
           for line in (state.get('supervisor_log_tail') or [])[-25:]: print(line)
